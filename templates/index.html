@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Simple AI Chat</title>
+    <style>
+      :root {
+        --bg: #f3efe8;
+        --panel: #fffaf2;
+        --panel-strong: #fffdf8;
+        --text: #1f1a17;
+        --subtle: #6f6359;
+        --line: #dccfc1;
+        --accent: #bd5d38;
+        --accent-strong: #8e3c1f;
+        --user: #f7d8b7;
+        --assistant: #f4eee7;
+        --shadow: 0 18px 40px rgba(88, 53, 37, 0.08);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, rgba(189, 93, 56, 0.14), transparent 28%),
+          radial-gradient(circle at bottom right, rgba(120, 146, 94, 0.12), transparent 24%),
+          linear-gradient(135deg, #f8f4ec 0%, #efe6db 100%);
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 280px 1fr;
+        gap: 18px;
+        min-height: 100vh;
+        padding: 18px;
+      }
+
+      .sidebar,
+      .main {
+        background: rgba(255, 250, 242, 0.84);
+        backdrop-filter: blur(8px);
+        border: 1px solid rgba(220, 207, 193, 0.9);
+        border-radius: 24px;
+        box-shadow: var(--shadow);
+      }
+
+      .sidebar {
+        padding: 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+
+      .brand h1 {
+        margin: 0;
+        font-size: 24px;
+      }
+
+      .brand p {
+        margin: 8px 0 0;
+        color: var(--subtle);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      .controls {
+        display: grid;
+        gap: 10px;
+      }
+
+      button,
+      select,
+      input,
+      textarea {
+        font: inherit;
+      }
+
+      button,
+      select,
+      input {
+        border-radius: 14px;
+        border: 1px solid var(--line);
+        background: var(--panel-strong);
+        color: var(--text);
+      }
+
+      button {
+        cursor: pointer;
+        padding: 10px 14px;
+        transition: 0.2s ease;
+      }
+
+      button:hover {
+        transform: translateY(-1px);
+        border-color: var(--accent);
+      }
+
+      .primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff7ef;
+      }
+
+      .primary:hover {
+        background: var(--accent-strong);
+      }
+
+      .field {
+        display: grid;
+        gap: 6px;
+      }
+
+      .field label {
+        font-size: 13px;
+        color: var(--subtle);
+      }
+
+      .field select,
+      .field input {
+        padding: 10px 12px;
+      }
+
+      .session-list {
+        display: grid;
+        gap: 8px;
+        overflow: auto;
+      }
+
+      .session-item {
+        text-align: left;
+        padding: 12px;
+      }
+
+      .session-item.active {
+        border-color: var(--accent);
+        background: #fff3e8;
+      }
+
+      .main {
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        overflow: hidden;
+      }
+
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        padding: 18px 22px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .topbar h2,
+      .topbar p {
+        margin: 0;
+      }
+
+      .topbar p {
+        color: var(--subtle);
+        font-size: 13px;
+      }
+
+      .messages {
+        padding: 22px;
+        overflow: auto;
+        display: grid;
+        align-content: start;
+        gap: 14px;
+      }
+
+      .message {
+        max-width: min(78%, 760px);
+        padding: 14px 16px;
+        border-radius: 18px;
+        line-height: 1.7;
+        white-space: pre-wrap;
+        word-break: break-word;
+        animation: fadeUp 0.2s ease;
+      }
+
+      .message.user {
+        margin-left: auto;
+        background: var(--user);
+      }
+
+      .message.assistant {
+        background: var(--assistant);
+      }
+
+      .composer {
+        padding: 18px 22px 22px;
+        border-top: 1px solid var(--line);
+        display: grid;
+        gap: 12px;
+      }
+
+      .composer textarea {
+        width: 100%;
+        min-height: 110px;
+        resize: vertical;
+        border-radius: 18px;
+        border: 1px solid var(--line);
+        padding: 14px 16px;
+        background: var(--panel-strong);
+        color: var(--text);
+      }
+
+      .composer-footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .hint,
+      .status {
+        font-size: 13px;
+        color: var(--subtle);
+      }
+
+      .actions {
+        display: flex;
+        gap: 10px;
+      }
+
+      @keyframes fadeUp {
+        from {
+          opacity: 0;
+          transform: translateY(6px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @media (max-width: 900px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+
+        .message {
+          max-width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="brand">
+          <h1>AI Chat</h1>
+          <p>最小可用聊天页，支持会话、模型切换、URL 切换。</p>
+        </div>
+
+        <div class="controls">
+          <button id="newSessionBtn" class="primary">新建会话</button>
+          <button id="clearHistoryBtn">清除当前对话</button>
+        </div>
+
+        <div class="field">
+          <label for="modelSelect">模型</label>
+          <select id="modelSelect">
+            {% for model in model_options %}
+            <option value="{{ model }}" {% if model == default_model %}selected{% endif %}>{{ model }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="urlSelect">URL</label>
+          <select id="urlSelect">
+            <option value="{{ global_url }}" {% if default_url == global_url %}selected{% endif %}>Global / SILICONFLOW_URL</option>
+            <option value="{{ cn_url }}" {% if default_url == cn_url %}selected{% endif %}>CN / SILICONFLOW_URL_CN</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="urlInput">当前 URL</label>
+          <input id="urlInput" value="{{ default_url }}" readonly />
+        </div>
+
+        <div class="field">
+          <label>会话列表</label>
+          <div id="sessionList" class="session-list"></div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <div class="topbar">
+          <div>
+            <h2 id="sessionTitle">未命名会话</h2>
+            <p>后端使用 `dotenv` + `ChatOpenAI`。</p>
+          </div>
+          <div class="status" id="status">就绪</div>
+        </div>
+
+        <section id="messages" class="messages"></section>
+
+        <section class="composer">
+          <textarea id="messageInput" placeholder="输入消息，按 Ctrl/Cmd + Enter 发送"></textarea>
+          <div class="composer-footer">
+            <div class="hint">默认模型为 DeepSeek，可切换到 Qwen；URL 支持 Global / CN。</div>
+            <div class="actions">
+              <button id="sendBtn" class="primary">发送</button>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      const storageKey = "simple-ai-chat-sessions";
+      const activeKey = "simple-ai-chat-active";
+
+      const modelSelect = document.getElementById("modelSelect");
+      const urlSelect = document.getElementById("urlSelect");
+      const urlInput = document.getElementById("urlInput");
+      const sessionList = document.getElementById("sessionList");
+      const sessionTitle = document.getElementById("sessionTitle");
+      const messagesEl = document.getElementById("messages");
+      const messageInput = document.getElementById("messageInput");
+      const statusEl = document.getElementById("status");
+      const sendBtn = document.getElementById("sendBtn");
+
+      function readSessions() {
+        try {
+          return JSON.parse(localStorage.getItem(storageKey) || "[]");
+        } catch {
+          return [];
+        }
+      }
+
+      function writeSessions(sessions) {
+        localStorage.setItem(storageKey, JSON.stringify(sessions));
+      }
+
+      function getActiveId() {
+        return localStorage.getItem(activeKey);
+      }
+
+      function setActiveId(id) {
+        localStorage.setItem(activeKey, id);
+      }
+
+      function createSession() {
+        const now = new Date();
+        return {
+          id: crypto.randomUUID(),
+          title: `新会话 ${now.toLocaleString()}`,
+          messages: [],
+          createdAt: now.toISOString()
+        };
+      }
+
+      function ensureSession() {
+        const sessions = readSessions();
+        const activeId = getActiveId();
+        let active = sessions.find((item) => item.id === activeId);
+
+        if (!active) {
+          active = createSession();
+          sessions.unshift(active);
+          writeSessions(sessions);
+          setActiveId(active.id);
+        }
+
+        return active;
+      }
+
+      function updateSession(mutator) {
+        const sessions = readSessions();
+        const activeId = getActiveId();
+        const next = sessions.map((item) => {
+          if (item.id !== activeId) {
+            return item;
+          }
+          return mutator(item);
+        });
+        writeSessions(next);
+      }
+
+      function renderSessions() {
+        const sessions = readSessions();
+        const activeId = getActiveId();
+        sessionList.innerHTML = "";
+
+        sessions.forEach((session) => {
+          const button = document.createElement("button");
+          button.className = `session-item${session.id === activeId ? " active" : ""}`;
+          button.textContent = session.title;
+          button.onclick = () => {
+            setActiveId(session.id);
+            renderAll();
+          };
+          sessionList.appendChild(button);
+        });
+      }
+
+      function renderMessages() {
+        const session = ensureSession();
+        sessionTitle.textContent = session.title;
+        messagesEl.innerHTML = "";
+
+        if (!session.messages.length) {
+          const empty = document.createElement("div");
+          empty.className = "status";
+          empty.textContent = "当前会话还没有消息。";
+          messagesEl.appendChild(empty);
+          return;
+        }
+
+        session.messages.forEach((message) => {
+          const div = document.createElement("div");
+          div.className = `message ${message.role}`;
+          div.textContent = message.content;
+          messagesEl.appendChild(div);
+        });
+
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      }
+
+      function renderAll() {
+        renderSessions();
+        renderMessages();
+      }
+
+      function setBusy(busy, text) {
+        sendBtn.disabled = busy;
+        statusEl.textContent = text;
+      }
+
+      function currentHistory() {
+        return ensureSession().messages.map(({ role, content }) => ({ role, content }));
+      }
+
+      async function sendMessage() {
+        const message = messageInput.value.trim();
+        if (!message) {
+          return;
+        }
+
+        updateSession((session) => {
+          const title = session.messages.length === 0 ? message.slice(0, 18) : session.title;
+          return {
+            ...session,
+            title,
+            messages: [...session.messages, { role: "user", content: message }]
+          };
+        });
+
+        messageInput.value = "";
+        renderAll();
+        setBusy(true, "AI 回复中...");
+
+        try {
+          const response = await fetch("/api/chat", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              message,
+              model: modelSelect.value,
+              baseUrl: urlInput.value,
+              history: currentHistory().slice(0, -1)
+            })
+          });
+
+          const data = await response.json();
+          if (!response.ok) {
+            throw new Error(data.error || "请求失败");
+          }
+
+          updateSession((session) => ({
+            ...session,
+            messages: [...session.messages, { role: "assistant", content: data.content }]
+          }));
+
+          renderAll();
+          setBusy(false, "就绪");
+        } catch (error) {
+          updateSession((session) => ({
+            ...session,
+            messages: [
+              ...session.messages,
+              { role: "assistant", content: `请求失败：${error.message}` }
+            ]
+          }));
+          renderAll();
+          setBusy(false, "请求失败");
+        }
+      }
+
+      document.getElementById("newSessionBtn").onclick = () => {
+        const sessions = readSessions();
+        const session = createSession();
+        sessions.unshift(session);
+        writeSessions(sessions);
+        setActiveId(session.id);
+        renderAll();
+      };
+
+      document.getElementById("clearHistoryBtn").onclick = () => {
+        updateSession((session) => ({ ...session, messages: [] }));
+        renderAll();
+      };
+
+      urlSelect.onchange = () => {
+        urlInput.value = urlSelect.value;
+      };
+
+      sendBtn.onclick = sendMessage;
+
+      messageInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault();
+          sendMessage();
+        }
+      });
+
+      ensureSession();
+      renderAll();
+    </script>
+  </body>
+</html>
