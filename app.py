@@ -2,7 +2,7 @@ import os
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 
@@ -21,6 +21,14 @@ URL_OPTIONS = {
     "cn": os.getenv("SILICONFLOW_URL_CN", ""),
 }
 DEFAULT_BASE_URL = URL_OPTIONS["cn"] or URL_OPTIONS["global"]
+
+
+@app.after_request
+def disable_cache(response):
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 def build_llm(model: str, base_url: str) -> ChatOpenAI:
@@ -50,7 +58,7 @@ def build_messages(history: list[dict]) -> list:
     return messages
 
 
-def normalize_content(content) -> str:
+def stringify_content(content) -> str:
     if isinstance(content, str):
         return content
     if isinstance(content, list):
@@ -62,6 +70,10 @@ def normalize_content(content) -> str:
                 parts.append(str(item))
         return "\n".join(part for part in parts if part)
     return str(content)
+
+
+def normalize_content(content) -> str:
+    return stringify_content(content).lstrip("\r\n")
 
 
 @app.get("/")
@@ -120,6 +132,47 @@ def chat():
             "role": "assistant",
             "content": normalize_content(response.content),
         }
+    )
+
+
+@app.post("/api/chat/stream")
+def chat_stream():
+    data = request.get_json(silent=True) or {}
+    message = (data.get("message") or "").strip()
+    model = (data.get("model") or DEFAULT_MODEL).strip()
+    base_url = (data.get("baseUrl") or DEFAULT_BASE_URL).strip()
+    history = data.get("history") or []
+
+    if not message:
+        return jsonify({"error": "message is required"}), 400
+
+    if model not in MODEL_OPTIONS:
+        return jsonify({"error": "unsupported model"}), 400
+
+    valid_urls = {value for value in URL_OPTIONS.values() if value}
+    if base_url not in valid_urls:
+        return jsonify({"error": "unsupported url"}), 400
+
+    def generate():
+        try:
+            llm = build_llm(model, base_url)
+            messages = build_messages(history)
+            messages.append(HumanMessage(content=message))
+
+            first_chunk = True
+            for chunk in llm.stream(messages):
+                text = stringify_content(chunk.content)
+                if first_chunk:
+                    text = text.lstrip("\r\n")
+                    first_chunk = False
+                if text:
+                    yield text
+        except Exception as exc:
+            yield f"\n[ERROR] {exc}"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/plain; charset=utf-8",
     )
 
 

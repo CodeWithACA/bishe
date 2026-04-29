@@ -6,8 +6,6 @@
     <title>Simple AI Chat</title>
     <style>
       :root {
-        --bg: #f3efe8;
-        --panel: #fffaf2;
         --panel-strong: #fffdf8;
         --text: #1f1a17;
         --subtle: #6f6359;
@@ -25,7 +23,8 @@
 
       body {
         margin: 0;
-        min-height: 100vh;
+        height: 100vh;
+        overflow: hidden;
         font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
         color: var(--text);
         background:
@@ -38,7 +37,7 @@
         display: grid;
         grid-template-columns: 280px 1fr;
         gap: 18px;
-        min-height: 100vh;
+        height: 100vh;
         padding: 18px;
       }
 
@@ -56,6 +55,8 @@
         display: flex;
         flex-direction: column;
         gap: 16px;
+        max-height: calc(100vh - 36px);
+        overflow: hidden;
       }
 
       .brand h1 {
@@ -97,9 +98,14 @@
         transition: 0.2s ease;
       }
 
-      button:hover {
+      button:hover:enabled {
         transform: translateY(-1px);
         border-color: var(--accent);
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.65;
       }
 
       .primary {
@@ -108,7 +114,7 @@
         color: #fff7ef;
       }
 
-      .primary:hover {
+      .primary:hover:enabled {
         background: var(--accent-strong);
       }
 
@@ -131,11 +137,27 @@
         display: grid;
         gap: 8px;
         overflow: auto;
+        min-height: 0;
+      }
+
+      .session-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+        align-items: center;
       }
 
       .session-item {
         text-align: left;
         padding: 12px;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .session-delete {
+        padding: 10px 12px;
       }
 
       .session-item.active {
@@ -147,6 +169,7 @@
         display: grid;
         grid-template-rows: auto 1fr auto;
         overflow: hidden;
+        min-height: 0;
       }
 
       .topbar {
@@ -163,7 +186,9 @@
         margin: 0;
       }
 
-      .topbar p {
+      .topbar p,
+      .status,
+      .hint {
         color: var(--subtle);
         font-size: 13px;
       }
@@ -174,6 +199,7 @@
         display: grid;
         align-content: start;
         gap: 14px;
+        min-height: 0;
       }
 
       .message {
@@ -193,6 +219,10 @@
 
       .message.assistant {
         background: var(--assistant);
+      }
+
+      .message.pending {
+        opacity: 0.8;
       }
 
       .composer {
@@ -220,12 +250,6 @@
         gap: 12px;
       }
 
-      .hint,
-      .status {
-        font-size: 13px;
-        color: var(--subtle);
-      }
-
       .actions {
         display: flex;
         gap: 10px;
@@ -243,8 +267,19 @@
       }
 
       @media (max-width: 900px) {
+        body {
+          height: auto;
+          overflow: auto;
+        }
+
         .layout {
           grid-template-columns: 1fr;
+          height: auto;
+          min-height: 100vh;
+        }
+
+        .sidebar {
+          max-height: none;
         }
 
         .message {
@@ -263,7 +298,7 @@
 
         <div class="controls">
           <button id="newSessionBtn" class="primary">新建会话</button>
-          <button id="clearHistoryBtn">清除当前对话</button>
+          <button id="clearHistoryBtn">清空当前对话</button>
         </div>
 
         <div class="field">
@@ -306,7 +341,7 @@
         <section id="messages" class="messages"></section>
 
         <section class="composer">
-          <textarea id="messageInput" placeholder="输入消息，按 Ctrl/Cmd + Enter 发送"></textarea>
+          <textarea id="messageInput" placeholder="输入消息，按 Enter 发送，Shift + Enter 换行"></textarea>
           <div class="composer-footer">
             <div class="hint">默认模型为 DeepSeek，可切换到 Qwen；URL 支持 Global / CN。</div>
             <div class="actions">
@@ -330,6 +365,7 @@
       const messageInput = document.getElementById("messageInput");
       const statusEl = document.getElementById("status");
       const sendBtn = document.getElementById("sendBtn");
+      const clearHistoryBtn = document.getElementById("clearHistoryBtn");
 
       function readSessions() {
         try {
@@ -362,11 +398,17 @@
       }
 
       function ensureSession() {
-        const sessions = readSessions();
+        let sessions = readSessions();
         const activeId = getActiveId();
         let active = sessions.find((item) => item.id === activeId);
 
         if (!active) {
+          if (sessions.length) {
+            active = sessions[0];
+            setActiveId(active.id);
+            return active;
+          }
+
           active = createSession();
           sessions.unshift(active);
           writeSessions(sessions);
@@ -388,20 +430,51 @@
         writeSessions(next);
       }
 
+      function deleteSession(id) {
+        const sessions = readSessions().filter((session) => session.id !== id);
+        writeSessions(sessions);
+
+        if (!sessions.length) {
+          const next = createSession();
+          writeSessions([next]);
+          setActiveId(next.id);
+        } else if (getActiveId() === id) {
+          setActiveId(sessions[0].id);
+        }
+
+        renderAll();
+      }
+
       function renderSessions() {
         const sessions = readSessions();
         const activeId = getActiveId();
         sessionList.innerHTML = "";
 
         sessions.forEach((session) => {
+          const row = document.createElement("div");
+          row.className = "session-row";
+
           const button = document.createElement("button");
           button.className = `session-item${session.id === activeId ? " active" : ""}`;
           button.textContent = session.title;
+          button.title = session.title;
           button.onclick = () => {
             setActiveId(session.id);
             renderAll();
           };
-          sessionList.appendChild(button);
+
+          const deleteButton = document.createElement("button");
+          deleteButton.className = "session-delete";
+          deleteButton.textContent = "删";
+          deleteButton.title = "删除会话";
+          deleteButton.onclick = (event) => {
+            event.stopPropagation();
+            deleteSession(session.id);
+          };
+
+          row.appendChild(button);
+          row.appendChild(deleteButton);
+          sessionList.appendChild(row);
         });
       }
 
@@ -420,11 +493,24 @@
 
         session.messages.forEach((message) => {
           const div = document.createElement("div");
-          div.className = `message ${message.role}`;
+          div.className = `message ${message.role}${message.pending ? " pending" : ""}`;
           div.textContent = message.content;
           messagesEl.appendChild(div);
         });
 
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      }
+
+      function updateLastAssistantBubble(content, pending = false) {
+        const nodes = messagesEl.querySelectorAll(".message.assistant");
+        const lastNode = nodes[nodes.length - 1];
+        if (!lastNode) {
+          renderMessages();
+          return;
+        }
+
+        lastNode.textContent = content;
+        lastNode.classList.toggle("pending", pending);
         messagesEl.scrollTop = messagesEl.scrollHeight;
       }
 
@@ -435,11 +521,25 @@
 
       function setBusy(busy, text) {
         sendBtn.disabled = busy;
+        clearHistoryBtn.disabled = busy;
         statusEl.textContent = text;
       }
 
+      async function readErrorMessage(response) {
+        const raw = await response.text();
+
+        try {
+          const data = JSON.parse(raw);
+          return data.error || raw || "请求失败";
+        } catch {
+          return raw || "请求失败";
+        }
+      }
+
       function currentHistory() {
-        return ensureSession().messages.map(({ role, content }) => ({ role, content }));
+        return ensureSession().messages
+          .filter((item) => !item.pending)
+          .map(({ role, content }) => ({ role, content }));
       }
 
       async function sendMessage() {
@@ -458,11 +558,19 @@
         });
 
         messageInput.value = "";
-        renderAll();
-        setBusy(true, "AI 回复中...");
+        updateSession((session) => ({
+          ...session,
+          messages: [
+            ...session.messages,
+            { role: "assistant", content: "正在思考...", pending: true }
+          ]
+        }));
 
         try {
-          const response = await fetch("/api/chat", {
+          renderAll();
+          setBusy(true, "AI 思考中...");
+
+          const response = await fetch("/api/chat/stream", {
             method: "POST",
             headers: {
               "Content-Type": "application/json"
@@ -475,25 +583,53 @@
             })
           });
 
-          const data = await response.json();
           if (!response.ok) {
-            throw new Error(data.error || "请求失败");
+            throw new Error(await readErrorMessage(response));
           }
 
-          updateSession((session) => ({
-            ...session,
-            messages: [...session.messages, { role: "assistant", content: data.content }]
-          }));
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder("utf-8");
+          let fullText = "";
+
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) {
+              break;
+            }
+
+            fullText += decoder.decode(value, { stream: true });
+            updateSession((session) => {
+              const messages = [...session.messages];
+              messages[messages.length - 1] = {
+                role: "assistant",
+                content: fullText.trimStart() || "正在思考..."
+              };
+              return { ...session, messages };
+            });
+            updateLastAssistantBubble(fullText.trimStart() || "正在思考...");
+          }
+
+          fullText += decoder.decode();
+          updateSession((session) => {
+            const messages = [...session.messages];
+            messages[messages.length - 1] = {
+              role: "assistant",
+              content: fullText.trimStart() || "未返回内容"
+            };
+            return { ...session, messages };
+          });
 
           renderAll();
           setBusy(false, "就绪");
         } catch (error) {
           updateSession((session) => ({
             ...session,
-            messages: [
-              ...session.messages,
-              { role: "assistant", content: `请求失败：${error.message}` }
-            ]
+            messages: session.messages.map((item, index) => {
+              if (index === session.messages.length - 1 && item.role === "assistant") {
+                return { role: "assistant", content: `请求失败：${error.message}` };
+              }
+              return item;
+            })
           }));
           renderAll();
           setBusy(false, "请求失败");
@@ -509,7 +645,7 @@
         renderAll();
       };
 
-      document.getElementById("clearHistoryBtn").onclick = () => {
+      clearHistoryBtn.onclick = () => {
         updateSession((session) => ({ ...session, messages: [] }));
         renderAll();
       };
