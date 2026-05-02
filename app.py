@@ -11,7 +11,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 
 from airsim import AirSimClient, ImageRequest, ImageType
-from drone_agent import run_drone_agent
+from agent.drone_agent import run_drone_agent
 
 
 load_dotenv()

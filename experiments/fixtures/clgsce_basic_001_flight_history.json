@@ -1,0 +1,18 @@
+[
+  {
+    "index": 1,
+    "action": "takeoff",
+    "params": {"altitude_m": 5.0},
+    "before": {"x": 0.0, "y": 0.0, "z": -10.0, "yaw_deg": 0.0},
+    "after": {"x": 0.0, "y": 0.0, "z": -15.0, "yaw_deg": 0.0},
+    "created_at": 0
+  },
+  {
+    "index": 2,
+    "action": "fly_to",
+    "params": {"x": 0.0, "y": 0.0, "altitude_m": 11.0},
+    "before": {"x": 0.0, "y": 0.0, "z": -15.0, "yaw_deg": 0.0},
+    "after": {"x": 0.0, "y": 0.0, "z": -11.0, "yaw_deg": 0.0},
+    "created_at": 0
+  }
+]

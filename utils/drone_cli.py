@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import argparse
 import os
+from pathlib import Path
 from uuid import uuid4
 
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 
-load_dotenv()
+ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(ROOT / ".env")
 
-from drone_agent import MAX_AGENT_STEPS, run_drone_agent_trace
+from agent.drone_agent import MAX_AGENT_STEPS, run_drone_agent_trace
 
 
 DEFAULT_MODEL = "deepseek-ai/DeepSeek-V3.2"
@@ -29,7 +31,7 @@ def build_llm(model: str, base_url: str) -> ChatOpenAI:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Trace a LangGraph AirSim drone agent run in the terminal.")
+    parser = argparse.ArgumentParser(description="Trace a LangGraph drone agent run in the terminal.")
     parser.add_argument("task", nargs="*", help="Drone task text.")
     parser.add_argument("--model", default=os.getenv("DRONE_AGENT_MODEL", DEFAULT_MODEL))
     parser.add_argument("--base-url", default=os.getenv("SILICONFLOW_URL_CN") or os.getenv("SILICONFLOW_URL", ""))
