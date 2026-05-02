@@ -41,3 +41,19 @@ python app.py
 ```text
 http://127.0.0.1:5000
 ```
+
+## AirSim
+
+页面左侧会从 AirSim RPC 读取实时画面和遥测数据。默认连接：
+
+```env
+AIRSIM_HOST=127.0.0.1
+AIRSIM_PORT=41451
+AIRSIM_CAMERA=0
+AIRSIM_VEHICLE=
+```
+
+AirSim 启动后，网页会自动请求：
+
+- `/api/airsim/stream`：MJPEG 视频流
+- `/api/airsim/telemetry`：经纬度、高度、速度、航向、姿态数据

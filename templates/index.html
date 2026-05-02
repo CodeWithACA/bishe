@@ -3,18 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Simple AI Chat</title>
+    <title>AirSim AI Control</title>
     <style>
       :root {
-        --panel-strong: #fffdf8;
-        --text: #1f1a17;
-        --subtle: #6f6359;
-        --line: #dccfc1;
-        --accent: #bd5d38;
-        --accent-strong: #8e3c1f;
-        --user: #f7d8b7;
-        --assistant: #f4eee7;
-        --shadow: 0 18px 40px rgba(88, 53, 37, 0.08);
+        --bg: #101820;
+        --panel: #17232d;
+        --panel-2: #1e2d38;
+        --panel-3: #233644;
+        --text: #edf6f9;
+        --muted: #9fb3c1;
+        --line: #314653;
+        --accent: #2dd4bf;
+        --accent-2: #f59e0b;
+        --danger: #fb7185;
+        --user: #d9f99d;
+        --assistant: #263846;
+        --shadow: 0 20px 45px rgba(0, 0, 0, 0.28);
       }
 
       * {
@@ -25,55 +29,12 @@
         margin: 0;
         height: 100vh;
         overflow: hidden;
-        font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-        color: var(--text);
         background:
-          radial-gradient(circle at top left, rgba(189, 93, 56, 0.14), transparent 28%),
-          radial-gradient(circle at bottom right, rgba(120, 146, 94, 0.12), transparent 24%),
-          linear-gradient(135deg, #f8f4ec 0%, #efe6db 100%);
-      }
-
-      .layout {
-        display: grid;
-        grid-template-columns: 280px 1fr;
-        gap: 18px;
-        height: 100vh;
-        padding: 18px;
-      }
-
-      .sidebar,
-      .main {
-        background: rgba(255, 250, 242, 0.84);
-        backdrop-filter: blur(8px);
-        border: 1px solid rgba(220, 207, 193, 0.9);
-        border-radius: 24px;
-        box-shadow: var(--shadow);
-      }
-
-      .sidebar {
-        padding: 18px;
-        display: flex;
-        flex-direction: column;
-        gap: 16px;
-        max-height: calc(100vh - 36px);
-        overflow: hidden;
-      }
-
-      .brand h1 {
-        margin: 0;
-        font-size: 24px;
-      }
-
-      .brand p {
-        margin: 8px 0 0;
-        color: var(--subtle);
-        font-size: 13px;
-        line-height: 1.5;
-      }
-
-      .controls {
-        display: grid;
-        gap: 10px;
+          linear-gradient(135deg, rgba(45, 212, 191, 0.08), transparent 28%),
+          linear-gradient(315deg, rgba(245, 158, 11, 0.1), transparent 24%),
+          var(--bg);
+        color: var(--text);
+        font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
       }
 
       button,
@@ -86,134 +47,310 @@
       button,
       select,
       input {
-        border-radius: 14px;
         border: 1px solid var(--line);
-        background: var(--panel-strong);
+        border-radius: 8px;
+        background: var(--panel-2);
         color: var(--text);
       }
 
       button {
         cursor: pointer;
-        padding: 10px 14px;
-        transition: 0.2s ease;
+        padding: 9px 12px;
+        transition: 0.16s ease;
       }
 
       button:hover:enabled {
-        transform: translateY(-1px);
         border-color: var(--accent);
+        transform: translateY(-1px);
       }
 
       button:disabled {
         cursor: not-allowed;
-        opacity: 0.65;
+        opacity: 0.6;
       }
 
-      .primary {
-        background: var(--accent);
-        border-color: var(--accent);
-        color: #fff7ef;
-      }
-
-      .primary:hover:enabled {
-        background: var(--accent-strong);
-      }
-
-      .field {
+      .app-shell {
         display: grid;
-        gap: 6px;
+        grid-template-columns: minmax(520px, 1.08fr) minmax(440px, 0.92fr);
+        gap: 14px;
+        height: 100vh;
+        padding: 14px;
       }
 
-      .field label {
-        font-size: 13px;
-        color: var(--subtle);
-      }
-
-      .field select,
-      .field input {
-        padding: 10px 12px;
-      }
-
-      .session-list {
-        display: grid;
-        gap: 8px;
-        overflow: auto;
+      .panel {
         min-height: 0;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: rgba(23, 35, 45, 0.9);
+        box-shadow: var(--shadow);
       }
 
-      .session-row {
+      .flight-panel {
         display: grid;
-        grid-template-columns: 1fr auto;
-        gap: 8px;
-        align-items: center;
-      }
-
-      .session-item {
-        text-align: left;
-        padding: 12px;
-        min-width: 0;
+        grid-template-rows: auto minmax(280px, 1fr) auto;
         overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
       }
 
-      .session-delete {
-        padding: 10px 12px;
-      }
-
-      .session-item.active {
-        border-color: var(--accent);
-        background: #fff3e8;
-      }
-
-      .main {
-        display: grid;
-        grid-template-rows: auto 1fr auto;
-        overflow: hidden;
-        min-height: 0;
-      }
-
-      .topbar {
+      .panel-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
         gap: 12px;
-        padding: 18px 22px;
+        padding: 14px 16px;
         border-bottom: 1px solid var(--line);
       }
 
-      .topbar h2,
-      .topbar p {
+      .title-block h1,
+      .title-block h2,
+      .title-block p {
         margin: 0;
       }
 
-      .topbar p,
+      .title-block h1,
+      .title-block h2 {
+        font-size: 18px;
+        line-height: 1.2;
+      }
+
+      .title-block p,
       .status,
       .hint {
-        color: var(--subtle);
-        font-size: 13px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .connection-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 96px;
+        justify-content: center;
+        padding: 7px 10px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .connection-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--danger);
+      }
+
+      .connection-pill.online .connection-dot {
+        background: var(--accent);
+      }
+
+      .flight-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .view-switch {
+        display: inline-flex;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(16, 24, 32, 0.58);
+      }
+
+      .view-button {
+        min-width: 72px;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        color: var(--muted);
+      }
+
+      .view-button + .view-button {
+        border-left: 1px solid var(--line);
+      }
+
+      .view-button.active {
+        background: var(--accent);
+        color: #06201d;
+        font-weight: 650;
+      }
+
+      .video-stage {
+        position: relative;
+        min-height: 0;
+        background: #071016;
+      }
+
+      .video-stream {
+        width: 100%;
+        height: 100%;
+        display: block;
+        object-fit: cover;
+      }
+
+      .video-overlay {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background:
+          linear-gradient(rgba(237, 246, 249, 0.06) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(237, 246, 249, 0.04) 1px, transparent 1px);
+        background-size: 48px 48px;
+        mix-blend-mode: screen;
+        opacity: 0.35;
+      }
+
+      .hud-strip {
+        position: absolute;
+        left: 14px;
+        right: 14px;
+        bottom: 14px;
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+      }
+
+      .hud-item,
+      .telemetry-card,
+      .attitude-card {
+        border: 1px solid rgba(159, 179, 193, 0.22);
+        border-radius: 8px;
+        background: rgba(16, 24, 32, 0.76);
+        backdrop-filter: blur(8px);
+      }
+
+      .hud-item {
+        padding: 10px;
+      }
+
+      .metric-label {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+        text-transform: uppercase;
+      }
+
+      .metric-value {
+        display: block;
+        margin-top: 4px;
+        font-size: 20px;
+        font-weight: 650;
+      }
+
+      .telemetry-grid {
+        display: grid;
+        grid-template-columns: 1.2fr 0.8fr;
+        gap: 12px;
+        padding: 14px;
+        border-top: 1px solid var(--line);
+      }
+
+      .telemetry-card {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+        padding: 12px;
+      }
+
+      .attitude-card {
+        display: grid;
+        grid-template-columns: 104px 1fr;
+        gap: 12px;
+        align-items: center;
+        padding: 12px;
+      }
+
+      .attitude-ball {
+        position: relative;
+        width: 92px;
+        aspect-ratio: 1;
+        overflow: hidden;
+        border: 2px solid rgba(237, 246, 249, 0.8);
+        border-radius: 50%;
+        background: linear-gradient(#38bdf8 0 50%, #8b5e34 50% 100%);
+      }
+
+      .attitude-ball::before,
+      .attitude-ball::after {
+        content: "";
+        position: absolute;
+        left: 16%;
+        right: 16%;
+        top: 50%;
+        height: 2px;
+        background: #edf6f9;
+      }
+
+      .attitude-ball::after {
+        left: 50%;
+        right: auto;
+        top: 18%;
+        bottom: 18%;
+        width: 2px;
+        height: auto;
+      }
+
+      .attitude-readout {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+      }
+
+      .chat-panel {
+        display: grid;
+        grid-template-rows: auto minmax(120px, 1fr) auto auto;
+        overflow: hidden;
+      }
+
+      .chat-toolbar {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .field {
+        display: grid;
+        gap: 5px;
+        min-width: 0;
+      }
+
+      .field label {
+        color: var(--muted);
+        font-size: 11px;
+        text-transform: uppercase;
+      }
+
+      .field select,
+      .field input {
+        width: 100%;
+        min-width: 0;
+        padding: 9px 10px;
       }
 
       .messages {
-        padding: 22px;
+        min-height: 0;
         overflow: auto;
         display: grid;
         align-content: start;
-        gap: 14px;
-        min-height: 0;
+        gap: 12px;
+        padding: 16px;
       }
 
       .message {
-        max-width: min(78%, 760px);
-        padding: 14px 16px;
-        border-radius: 18px;
-        line-height: 1.7;
+        max-width: min(84%, 720px);
+        padding: 12px 14px;
+        border-radius: 8px;
+        line-height: 1.65;
         white-space: pre-wrap;
         word-break: break-word;
-        animation: fadeUp 0.2s ease;
+        animation: fadeUp 0.18s ease;
       }
 
       .message.user {
         margin-left: auto;
+        color: #203012;
         background: var(--user);
       }
 
@@ -222,43 +359,85 @@
       }
 
       .message.pending {
-        opacity: 0.8;
+        color: var(--muted);
+      }
+
+      .session-panel {
+        display: grid;
+        gap: 10px;
+        padding: 12px 16px;
+        border-top: 1px solid var(--line);
+      }
+
+      .session-actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      .session-list {
+        display: flex;
+        gap: 8px;
+        overflow-x: auto;
+        padding-bottom: 2px;
+      }
+
+      .session-row {
+        display: flex;
+        gap: 6px;
+        flex: 0 0 auto;
+      }
+
+      .session-item {
+        max-width: 160px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .session-item.active {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+
+      .session-delete {
+        color: var(--danger);
       }
 
       .composer {
-        padding: 18px 22px 22px;
-        border-top: 1px solid var(--line);
         display: grid;
-        gap: 12px;
+        gap: 10px;
+        padding: 14px 16px 16px;
+        border-top: 1px solid var(--line);
       }
 
       .composer textarea {
         width: 100%;
-        min-height: 110px;
+        min-height: 92px;
         resize: vertical;
-        border-radius: 18px;
         border: 1px solid var(--line);
-        padding: 14px 16px;
-        background: var(--panel-strong);
+        border-radius: 8px;
+        padding: 12px;
+        background: #0f1921;
         color: var(--text);
       }
 
       .composer-footer {
         display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 12px;
+        justify-content: flex-end;
+        gap: 10px;
       }
 
-      .actions {
-        display: flex;
-        gap: 10px;
+      .primary {
+        border-color: rgba(45, 212, 191, 0.5);
+        background: var(--accent);
+        color: #06201d;
+        font-weight: 650;
       }
 
       @keyframes fadeUp {
         from {
           opacity: 0;
-          transform: translateY(6px);
+          transform: translateY(4px);
         }
         to {
           opacity: 1;
@@ -266,90 +445,154 @@
         }
       }
 
-      @media (max-width: 900px) {
+      @media (max-width: 1050px) {
         body {
           height: auto;
           overflow: auto;
         }
 
-        .layout {
+        .app-shell {
           grid-template-columns: 1fr;
           height: auto;
           min-height: 100vh;
         }
 
-        .sidebar {
-          max-height: none;
+        .flight-panel {
+          min-height: 720px;
         }
 
-        .message {
-          max-width: 100%;
+        .chat-panel {
+          min-height: 720px;
         }
       }
     </style>
   </head>
   <body>
-    <div class="layout">
-      <aside class="sidebar">
-        <div class="brand">
-          <h1>AI Chat</h1>
-          <p>最小可用聊天页，支持会话、模型切换、URL 切换。</p>
+    <div class="app-shell">
+      <section class="panel flight-panel">
+        <header class="panel-header">
+          <div class="title-block">
+            <h1>AirSim Flight Monitor</h1>
+            <p>Live camera feed with expandable telemetry surfaces</p>
+          </div>
+          <div class="flight-actions">
+            <div class="view-switch" aria-label="Camera view">
+              <button class="view-button active" type="button" data-view="front">前视</button>
+              <button class="view-button" type="button" data-view="down">下视</button>
+            </div>
+            <div id="airsimStatus" class="connection-pill">
+              <span class="connection-dot"></span>
+              <span id="airsimStatusText">Connecting</span>
+            </div>
+          </div>
+        </header>
+
+        <div class="video-stage">
+          <img id="airsimVideo" class="video-stream" src="/api/airsim/stream?view=front&fps=15" alt="AirSim live camera" />
+          <div class="video-overlay"></div>
+          <div class="hud-strip">
+            <div class="hud-item">
+              <span class="metric-label">Altitude</span>
+              <span id="altitudeValue" class="metric-value">-- m</span>
+            </div>
+            <div class="hud-item">
+              <span class="metric-label">Speed</span>
+              <span id="speedValue" class="metric-value">-- m/s</span>
+            </div>
+            <div class="hud-item">
+              <span class="metric-label">Heading</span>
+              <span id="headingValue" class="metric-value">-- deg</span>
+            </div>
+            <div class="hud-item">
+              <span class="metric-label">Vertical</span>
+              <span id="verticalSpeedValue" class="metric-value">-- m/s</span>
+            </div>
+          </div>
         </div>
 
-        <div class="controls">
-          <button id="newSessionBtn" class="primary">新建会话</button>
-          <button id="clearHistoryBtn">清空当前对话</button>
+        <div class="telemetry-grid">
+          <div class="telemetry-card">
+            <div>
+              <span class="metric-label">Latitude</span>
+              <span id="latitudeValue" class="metric-value">--</span>
+            </div>
+            <div>
+              <span class="metric-label">Longitude</span>
+              <span id="longitudeValue" class="metric-value">--</span>
+            </div>
+            <div>
+              <span class="metric-label">Link</span>
+              <span id="linkValue" class="metric-value">--</span>
+            </div>
+          </div>
+          <div class="attitude-card">
+            <div id="attitudeBall" class="attitude-ball"></div>
+            <div class="attitude-readout">
+              <div>
+                <span class="metric-label">Roll</span>
+                <span id="rollValue" class="metric-value">--</span>
+              </div>
+              <div>
+                <span class="metric-label">Pitch</span>
+                <span id="pitchValue" class="metric-value">--</span>
+              </div>
+              <div>
+                <span class="metric-label">Yaw</span>
+                <span id="yawValue" class="metric-value">--</span>
+              </div>
+            </div>
+          </div>
         </div>
+      </section>
 
-        <div class="field">
-          <label for="modelSelect">模型</label>
-          <select id="modelSelect">
-            {% for model in model_options %}
-            <option value="{{ model }}" {% if model == default_model %}selected{% endif %}>{{ model }}</option>
-            {% endfor %}
-          </select>
-        </div>
-
-        <div class="field">
-          <label for="urlSelect">URL</label>
-          <select id="urlSelect">
-            <option value="{{ global_url }}" {% if default_url == global_url %}selected{% endif %}>Global / SILICONFLOW_URL</option>
-            <option value="{{ cn_url }}" {% if default_url == cn_url %}selected{% endif %}>CN / SILICONFLOW_URL_CN</option>
-          </select>
-        </div>
-
-        <div class="field">
-          <label for="urlInput">当前 URL</label>
-          <input id="urlInput" value="{{ default_url }}" readonly />
-        </div>
-
-        <div class="field">
-          <label>会话列表</label>
-          <div id="sessionList" class="session-list"></div>
-        </div>
-      </aside>
-
-      <main class="main">
-        <div class="topbar">
-          <div>
+      <section class="panel chat-panel">
+        <header class="panel-header">
+          <div class="title-block">
             <h2 id="sessionTitle">未命名会话</h2>
-            <p>后端使用 `dotenv` + `ChatOpenAI`。</p>
+            <p>AI command channel</p>
           </div>
           <div class="status" id="status">就绪</div>
+        </header>
+
+        <div class="chat-toolbar">
+          <div class="field">
+            <label for="modelSelect">Model</label>
+            <select id="modelSelect">
+              {% for model in model_options %}
+              <option value="{{ model }}" {% if model == default_model %}selected{% endif %}>{{ model }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label for="urlSelect">Endpoint</label>
+            <select id="urlSelect">
+              <option value="{{ global_url }}" {% if default_url == global_url %}selected{% endif %}>Global / SILICONFLOW_URL</option>
+              <option value="{{ cn_url }}" {% if default_url == cn_url %}selected{% endif %}>CN / SILICONFLOW_URL_CN</option>
+            </select>
+          </div>
+          <div class="field" style="grid-column: 1 / -1">
+            <label for="urlInput">Current URL</label>
+            <input id="urlInput" value="{{ default_url }}" readonly />
+          </div>
         </div>
 
         <section id="messages" class="messages"></section>
 
+        <div class="session-panel">
+          <div class="session-actions">
+            <button id="newSessionBtn" class="primary">新建会话</button>
+            <button id="clearHistoryBtn">清空当前对话</button>
+          </div>
+          <div id="sessionList" class="session-list"></div>
+        </div>
+
         <section class="composer">
           <textarea id="messageInput" placeholder="输入消息，按 Enter 发送，Shift + Enter 换行"></textarea>
           <div class="composer-footer">
-            <div class="hint">默认模型为 DeepSeek，可切换到 Qwen；URL 支持 Global / CN。</div>
-            <div class="actions">
-              <button id="sendBtn" class="primary">发送</button>
-            </div>
+            <button id="sendBtn" class="primary">发送</button>
           </div>
         </section>
-      </main>
+      </section>
     </div>
 
     <script>
@@ -366,6 +609,24 @@
       const statusEl = document.getElementById("status");
       const sendBtn = document.getElementById("sendBtn");
       const clearHistoryBtn = document.getElementById("clearHistoryBtn");
+      const airsimVideo = document.getElementById("airsimVideo");
+      const viewButtons = document.querySelectorAll(".view-button");
+
+      const telemetryEls = {
+        status: document.getElementById("airsimStatus"),
+        statusText: document.getElementById("airsimStatusText"),
+        altitude: document.getElementById("altitudeValue"),
+        speed: document.getElementById("speedValue"),
+        heading: document.getElementById("headingValue"),
+        verticalSpeed: document.getElementById("verticalSpeedValue"),
+        latitude: document.getElementById("latitudeValue"),
+        longitude: document.getElementById("longitudeValue"),
+        link: document.getElementById("linkValue"),
+        roll: document.getElementById("rollValue"),
+        pitch: document.getElementById("pitchValue"),
+        yaw: document.getElementById("yawValue"),
+        ball: document.getElementById("attitudeBall")
+      };
 
       function readSessions() {
         try {
@@ -377,6 +638,14 @@
 
       function writeSessions(sessions) {
         localStorage.setItem(storageKey, JSON.stringify(sessions));
+      }
+
+      function switchCameraView(view) {
+        const nextView = view === "down" ? "down" : "front";
+        viewButtons.forEach((button) => {
+          button.classList.toggle("active", button.dataset.view === nextView);
+        });
+        airsimVideo.src = `/api/airsim/stream?view=${encodeURIComponent(nextView)}&fps=15&t=${Date.now()}`;
       }
 
       function getActiveId() {
@@ -501,6 +770,11 @@
         messagesEl.scrollTop = messagesEl.scrollHeight;
       }
 
+      function renderAll() {
+        renderSessions();
+        renderMessages();
+      }
+
       function updateLastAssistantBubble(content, pending = false) {
         const nodes = messagesEl.querySelectorAll(".message.assistant");
         const lastNode = nodes[nodes.length - 1];
@@ -512,11 +786,6 @@
         lastNode.textContent = content;
         lastNode.classList.toggle("pending", pending);
         messagesEl.scrollTop = messagesEl.scrollHeight;
-      }
-
-      function renderAll() {
-        renderSessions();
-        renderMessages();
       }
 
       function setBusy(busy, text) {
@@ -579,7 +848,8 @@
               message,
               model: modelSelect.value,
               baseUrl: urlInput.value,
-              history: currentHistory().slice(0, -1)
+              history: currentHistory().slice(0, -1),
+              sessionId: getActiveId()
             })
           });
 
@@ -598,15 +868,16 @@
             }
 
             fullText += decoder.decode(value, { stream: true });
+            const visibleText = fullText.trimStart() || "正在思考...";
             updateSession((session) => {
               const messages = [...session.messages];
               messages[messages.length - 1] = {
                 role: "assistant",
-                content: fullText.trimStart() || "正在思考..."
+                content: visibleText
               };
               return { ...session, messages };
             });
-            updateLastAssistantBubble(fullText.trimStart() || "正在思考...");
+            updateLastAssistantBubble(visibleText);
           }
 
           fullText += decoder.decode();
@@ -636,6 +907,50 @@
         }
       }
 
+      function formatNumber(value, digits = 1, suffix = "") {
+        if (value === null || value === undefined || Number.isNaN(Number(value))) {
+          return "--";
+        }
+        return `${Number(value).toFixed(digits)}${suffix}`;
+      }
+
+      function formatCoordinate(value) {
+        if (value === null || value === undefined || Number.isNaN(Number(value))) {
+          return "--";
+        }
+        return Number(value).toFixed(6);
+      }
+
+      function updateTelemetry(data) {
+        const isOnline = Boolean(data.ok);
+        telemetryEls.status.classList.toggle("online", isOnline);
+        telemetryEls.statusText.textContent = isOnline ? "Online" : "Offline";
+        telemetryEls.link.textContent = isOnline ? "OK" : "LOST";
+
+        telemetryEls.altitude.textContent = formatNumber(data.altitude, 1, " m");
+        telemetryEls.speed.textContent = formatNumber(data.speed, 1, " m/s");
+        telemetryEls.heading.textContent = formatNumber(data.heading, 0, " deg");
+        telemetryEls.verticalSpeed.textContent = formatNumber(data.verticalSpeed, 1, " m/s");
+        telemetryEls.latitude.textContent = formatCoordinate(data.latitude);
+        telemetryEls.longitude.textContent = formatCoordinate(data.longitude);
+        telemetryEls.roll.textContent = formatNumber(data.roll, 0, " deg");
+        telemetryEls.pitch.textContent = formatNumber(data.pitch, 0, " deg");
+        telemetryEls.yaw.textContent = formatNumber(data.yaw, 0, " deg");
+
+        const roll = Number(data.roll || 0);
+        const pitch = Math.max(-35, Math.min(35, Number(data.pitch || 0)));
+        telemetryEls.ball.style.transform = `rotate(${-roll}deg) translateY(${pitch * 0.35}px)`;
+      }
+
+      async function pollTelemetry() {
+        try {
+          const response = await fetch("/api/airsim/telemetry");
+          updateTelemetry(await response.json());
+        } catch (error) {
+          updateTelemetry({ ok: false, error: error.message });
+        }
+      }
+
       document.getElementById("newSessionBtn").onclick = () => {
         const sessions = readSessions();
         const session = createSession();
@@ -656,6 +971,10 @@
 
       sendBtn.onclick = sendMessage;
 
+      viewButtons.forEach((button) => {
+        button.onclick = () => switchCameraView(button.dataset.view);
+      });
+
       messageInput.addEventListener("keydown", (event) => {
         if (event.key === "Enter" && !event.shiftKey) {
           event.preventDefault();
@@ -665,6 +984,8 @@
 
       ensureSession();
       renderAll();
+      pollTelemetry();
+      setInterval(pollTelemetry, 1000);
     </script>
   </body>
 </html>
