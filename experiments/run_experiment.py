@@ -19,12 +19,14 @@ if str(ROOT) not in sys.path:
 load_dotenv(ROOT / ".env")
 
 from agent.drone_agent import MAX_AGENT_STEPS, run_drone_agent_trace
-from agent.tools import get_flight_history
+from agent.px4_mavlink_controller import get_controller
+from agent.tools import clear_flight_history, get_flight_history
 from evaluate_experiment import DEFAULT_TASK_FILE, evaluate, load_observed_actions, load_task
 
 
 DEFAULT_MODEL = "deepseek-ai/DeepSeek-V3.2"
 RUNS_DIR = Path(__file__).resolve().parent / "runs"
+DEFAULT_INITIAL_ALTITUDE_M = 10.0
 
 
 class Tee:
@@ -61,6 +63,24 @@ def write_jsonl(path: Path, rows: list[dict]) -> None:
             file.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def prepare_initial_flight_state(altitude_m: float = DEFAULT_INITIAL_ALTITUDE_M) -> dict:
+    """Move the vehicle to a safe benchmark start pose before task logging starts."""
+    controller = get_controller()
+    before = controller.get_state()
+    start_x = float(before.get("x") or 0.0)
+    start_y = float(before.get("y") or 0.0)
+    altitude_result = controller.fly_to(start_x, start_y, float(altitude_m))
+    yaw_result = controller.set_yaw(0.0)
+    return {
+        "target_altitude_m": float(altitude_m),
+        "target_yaw_deg": 0.0,
+        "before": before,
+        "altitude_result": altitude_result,
+        "yaw_result": yaw_result,
+        "after": controller.get_state(),
+    }
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run one LangGraph drone task and write CLGSCE-style experiment logs.")
     parser.add_argument("--task-file", type=Path, default=DEFAULT_TASK_FILE)
@@ -70,6 +90,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", default=os.getenv("DRONE_AGENT_MODEL", DEFAULT_MODEL))
     parser.add_argument("--base-url", default=os.getenv("SILICONFLOW_URL_CN") or os.getenv("SILICONFLOW_URL", ""))
     parser.add_argument("--max-steps", type=int, default=MAX_AGENT_STEPS)
+    parser.add_argument("--initial-altitude-m", type=float, default=DEFAULT_INITIAL_ALTITUDE_M)
+    parser.add_argument("--skip-initial-state", action="store_true", help="Do not move to the safe initial altitude before task logging.")
     return parser.parse_args()
 
 
@@ -85,6 +107,11 @@ def main() -> None:
 
     session_id = f"experiment-{run_id}"
     write_json(run_dir / "task.json", task)
+
+    if not args.skip_initial_state:
+        setup = prepare_initial_flight_state(args.initial_altitude_m)
+        write_json(run_dir / "initial_state_setup.json", setup)
+    clear_flight_history(session_id)
 
     llm = build_llm(args.model, args.base_url)
     trace_path = run_dir / "agent_trace.txt"

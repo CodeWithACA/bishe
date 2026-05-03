@@ -37,6 +37,7 @@ def _compact_state(state: dict[str, Any] | None) -> dict[str, Any] | None:
         "z",
         "relative_altitude_m",
         "yaw_deg",
+        "yaw_rate_deg_s",
         "speed_mps",
         "vertical_speed_mps",
         "last_status_text",
@@ -93,15 +94,15 @@ def clear_flight_history(session_id: str) -> None:
 
 @tool
 def get_state() -> str:
-    """读取当前无人机状态，包括 PX4 本地 NED 坐标、离地高度、速度和姿态角。"""
+    """Read the current drone state, including PX4 local NED position, relative altitude, speed, and attitude."""
     state = get_controller().get_state()
     _record_action("get_state", {}, None, state)
     return json.dumps({"ok": True, "state": _compact_state(state)}, ensure_ascii=False)
 
 
-@tool
+
 def reset_airsim() -> str:
-    """清空当前会话的飞行动作历史。MAVLink/PX4 不提供通用仿真重置，仿真重置应在仿真器侧执行。"""
+    """Clear the current session flight action history. MAVLink/PX4 does not provide a safe generic simulator reset."""
     before = get_controller().get_state()
     clear_flight_history(current_session_id.get())
     after = get_controller().get_state()
@@ -119,7 +120,7 @@ def reset_airsim() -> str:
 
 @tool
 def takeoff(altitude_m: float = 3.0) -> str:
-    """起飞并相对当前高度上升指定米数，默认 3 米。工具会循环读取高度，高度差达到目标后进入位置保持。"""
+    """Take off and climb by altitude_m meters relative to the current altitude, then hold position."""
     result = get_controller().takeoff(float(altitude_m))
     entry = _record_action("takeoff", {"altitude_m": float(altitude_m)}, result.get("before"), result.get("after"))
     return json.dumps(_compact_action_result(result, entry), ensure_ascii=False)
@@ -127,7 +128,7 @@ def takeoff(altitude_m: float = 3.0) -> str:
 
 @tool
 def land() -> str:
-    """降落无人机，并在接近地面后尝试上锁。"""
+    """Land the drone and try to disarm after it is close to the ground."""
     result = get_controller().land()
     entry = _record_action("land", {}, result.get("before"), result.get("after"))
     return json.dumps(_compact_action_result(result, entry), ensure_ascii=False)
@@ -135,11 +136,21 @@ def land() -> str:
 
 @tool
 def fly_to(x: float, y: float, altitude_m: float, velocity_mps: float = DEFAULT_VELOCITY) -> str:
-    """飞到 PX4 本地 NED 坐标 x/y 和指定离地高度。x 向北，y 向东，altitude_m 为正数离地高度。"""
-    result = get_controller().fly_to(float(x), float(y), abs(float(altitude_m)))
+    """Fly to PX4 local NED x/y coordinates and a positive height above ground. x points north and y points east."""
+    altitude = float(altitude_m)
+    if altitude < 0:
+        return json.dumps(
+            {
+                "ok": False,
+                "error": "altitude_m must be a positive height above ground. For PX4 NED dz, convert it to altitude_m before calling fly_to.",
+            },
+            ensure_ascii=False,
+        )
+    velocity = float(velocity_mps)
+    result = get_controller().fly_to(float(x), float(y), altitude, velocity_mps=velocity)
     entry = _record_action(
         "fly_to",
-        {"x": float(x), "y": float(y), "altitude_m": abs(float(altitude_m)), "velocity_mps": float(velocity_mps)},
+        {"x": float(x), "y": float(y), "altitude_m": altitude, "velocity_mps": velocity},
         result.get("before"),
         result.get("after"),
     )
@@ -148,10 +159,10 @@ def fly_to(x: float, y: float, altitude_m: float, velocity_mps: float = DEFAULT_
 
 @tool
 def set_yaw(yaw_deg: float) -> str:
-    """把机头转到指定航向角，单位度。0 度约为北，90 度约为东。"""
+    """Turn the drone to an absolute yaw angle in degrees. 0 is north, 90 is east, 180 is south, and 270 is west."""
     result = get_controller().set_yaw(float(yaw_deg))
     entry = _record_action("set_yaw", {"yaw_deg": float(yaw_deg) % 360.0}, result.get("before"), result.get("after"))
     return json.dumps(_compact_action_result(result, entry), ensure_ascii=False)
 
 
-DRONE_TOOLS = [takeoff, land, fly_to, set_yaw, get_state, reset_airsim]
+DRONE_TOOLS = [takeoff, land, fly_to, set_yaw, get_state]

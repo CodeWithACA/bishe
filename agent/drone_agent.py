@@ -44,7 +44,7 @@ def build_drone_messages(
     recent_history = get_flight_history(session_id)
     messages: list[BaseMessage] = [
         SystemMessage(content=SYSTEM_PROMPT),
-        SystemMessage(content=f"当前会话的飞行动作历史：{json.dumps(recent_history, ensure_ascii=False)}"),
+        SystemMessage(content=f"Current session flight action history: {json.dumps(recent_history, ensure_ascii=False)}"),
     ]
 
     for item in history[-12:]:
@@ -134,6 +134,6 @@ def run_drone_agent_trace(
             print("\n========== FLIGHT HISTORY ==========")
             print(json.dumps(get_flight_history(session_id), ensure_ascii=False, indent=2))
 
-        return "已达到最大追踪步数，agent 停止。"
+        return "Maximum agent trace steps reached; agent stopped."
     finally:
         current_session_id.reset(token)

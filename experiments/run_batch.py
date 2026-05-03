@@ -25,7 +25,7 @@ from agent.drone_agent import MAX_AGENT_STEPS, run_drone_agent_trace
 from agent.tools import clear_flight_history, get_flight_history
 from airsim import AirSimClient
 from evaluate_experiment import evaluate, load_observed_actions
-from run_experiment import DEFAULT_MODEL, Tee, write_json, write_jsonl
+from run_experiment import DEFAULT_INITIAL_ALTITUDE_M, DEFAULT_MODEL, Tee, prepare_initial_flight_state, write_json, write_jsonl
 
 
 EXPERIMENTS_DIR = Path(__file__).resolve().parent
@@ -178,6 +178,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", default=os.getenv("DRONE_AGENT_MODEL", DEFAULT_MODEL))
     parser.add_argument("--base-url", default=os.getenv("SILICONFLOW_URL_CN") or os.getenv("SILICONFLOW_URL", ""))
     parser.add_argument("--max-steps", type=int, default=MAX_AGENT_STEPS)
+    parser.add_argument("--initial-altitude-m", type=float, default=DEFAULT_INITIAL_ALTITUDE_M)
+    parser.add_argument("--skip-initial-state", action="store_true", help="Do not move to the safe initial altitude before task logging.")
     parser.add_argument("--skip-reset", action="store_true", help="Do not reset AirSim before each task.")
     parser.add_argument("--skip-px4", action="store_true", help="Do not start/stop PX4 around each task.")
     parser.add_argument("--continue-on-error", action="store_true", help="Keep running later tasks after a failure.")
@@ -222,6 +224,11 @@ def main() -> None:
                 print("Starting PX4...")
                 px4_start = start_px4(args.px4_server_url.rstrip("/"), args.px4_dir, args.mavlink_command, args.px4_startup_delay)
                 write_json(task_run_dir / "px4_start.json", px4_start)
+
+            if not args.skip_initial_state:
+                print(f"Preparing initial flight state at {args.initial_altitude_m:g}m...")
+                setup = prepare_initial_flight_state(args.initial_altitude_m)
+                write_json(task_run_dir / "initial_state_setup.json", setup)
 
             evaluation = run_one_task(llm, task, task_run_dir, args.max_steps)
             record.update(
