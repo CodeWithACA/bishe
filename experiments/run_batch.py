@@ -51,7 +51,7 @@ def build_llm(model: str, base_url: str) -> ChatOpenAI:
     api_key = os.getenv("SILICONFLOW_API_KEY")
     if not api_key:
         raise ValueError("Missing SILICONFLOW_API_KEY in .env")
-    return ChatOpenAI(model=model, api_key=api_key, base_url=base_url, temperature=0.2)
+    return ChatOpenAI(model=model, api_key=api_key, base_url=base_url, temperature=0)
 
 
 def post_json(url: str, payload: dict[str, Any], timeout: float = 30.0) -> dict[str, Any]:

@@ -32,23 +32,40 @@ DEFAULT_INITIAL_ALTITUDE_M = 10.0
 class Tee:
     def __init__(self, *streams):
         self.streams = streams
+        self.console_streams = set(streams[:1])
 
     def write(self, data: str) -> int:
         for stream in self.streams:
-            stream.write(data)
-            stream.flush()
+            try:
+                stream.write(data)
+            except UnicodeEncodeError:
+                encoding = getattr(stream, "encoding", None) or "utf-8"
+                stream.write(data.encode(encoding, errors="replace").decode(encoding))
+            except OSError:
+                if stream not in self.console_streams:
+                    raise
+                continue
+            try:
+                stream.flush()
+            except OSError:
+                if stream not in self.console_streams:
+                    raise
         return len(data)
 
     def flush(self) -> None:
         for stream in self.streams:
-            stream.flush()
+            try:
+                stream.flush()
+            except OSError:
+                if stream not in self.console_streams:
+                    raise
 
 
 def build_llm(model: str, base_url: str) -> ChatOpenAI:
     api_key = os.getenv("SILICONFLOW_API_KEY")
     if not api_key:
         raise ValueError("Missing SILICONFLOW_API_KEY in .env")
-    return ChatOpenAI(model=model, api_key=api_key, base_url=base_url, temperature=0.2)
+    return ChatOpenAI(model=model, api_key=api_key, base_url=base_url, temperature=0)
 
 
 def write_json(path: Path, data) -> None:

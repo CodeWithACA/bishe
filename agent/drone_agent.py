@@ -13,7 +13,7 @@ from .prompt import SYSTEM_PROMPT
 from .tools import DRONE_TOOLS, current_session_id, get_flight_history
 
 
-MAX_AGENT_STEPS = 12
+MAX_AGENT_STEPS = 40
 
 
 class DroneAgentState(TypedDict):

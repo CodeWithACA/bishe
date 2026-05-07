@@ -117,7 +117,7 @@ class PX4MavlinkController:
         data["timestamp"] = int(time.time())
         return data
 
-    def takeoff(self, altitude_m: float = 5.0, timeout: float = DEFAULT_TIMEOUT) -> dict:
+    def takeoff(self, altitude_m: float = 1.5, timeout: float = DEFAULT_TIMEOUT) -> dict:
         self.connect()
         altitude_m = max(0.5, float(altitude_m))
         before = self.get_state()
