@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextvars
 import json
 import time
+import math
 from typing import Any
 
 from langchain_core.tools import tool
@@ -11,6 +12,7 @@ from .px4_mavlink_controller import get_controller
 
 
 DEFAULT_VELOCITY = 0.8
+DEFAULT_TAKEOFF_ALTITUDE_M = 1.5
 
 current_session_id: contextvars.ContextVar[str] = contextvars.ContextVar(
     "current_drone_session_id",
@@ -20,6 +22,8 @@ _flight_histories: dict[str, list[dict[str, Any]]] = {}
 
 
 def _round_number(value: Any, digits: int = 3) -> Any:
+    if isinstance(value, bool):
+        return value
     if isinstance(value, (int, float)):
         return round(float(value), digits)
     return value
@@ -28,20 +32,7 @@ def _round_number(value: Any, digits: int = 3) -> Any:
 def _compact_state(state: dict[str, Any] | None) -> dict[str, Any] | None:
     if not state:
         return None
-    keys = [
-        "connected",
-        "armed",
-        "mode",
-        "x",
-        "y",
-        "z",
-        "relative_altitude_m",
-        "yaw_deg",
-        "yaw_rate_deg_s",
-        "speed_mps",
-        "vertical_speed_mps",
-        "last_status_text",
-    ]
+    keys = ["x", "y", "z", "relative_altitude_m", "yaw_deg"]
     compact: dict[str, Any] = {}
     for key in keys:
         if key in state and state[key] is not None:
@@ -58,16 +49,37 @@ def _compact_history_ref(entry: dict[str, Any]) -> dict[str, Any]:
 
 
 def _compact_action_result(result: dict[str, Any], history_entry: dict[str, Any] | None = None) -> dict[str, Any]:
-    compact: dict[str, Any] = {"ok": bool(result.get("ok", False))}
-    for key in ("target_reached", "error", "height_delta_m", "distance_error_m", "yaw_error_deg"):
-        if key in result:
-            compact[key] = _round_number(result[key])
+    payload = {"ok": bool(result.get("ok", False))}
     if history_entry:
-        compact["history"] = _compact_history_ref(history_entry)
-    after = _compact_state(result.get("after"))
-    if after:
-        compact["state"] = after
-    return compact
+        status = _status_text(history_entry)
+        if status:
+            payload["message"] = status
+    return payload
+
+
+def _status_text(entry: dict[str, Any]) -> str:
+    action = entry.get("action")
+    params = entry.get("params") or {}
+    after = entry.get("after") or {}
+    if action == "set_yaw":
+        yaw = after.get("yaw_deg", params.get("yaw_deg"))
+        return f"Drone is heading {_round_number(yaw)}° ({_heading_name(float(yaw or 0.0))} direction)."
+    if action == "move_body":
+        direction = str(params.get("direction", "")).lower()
+        distance = _round_number(params.get("distance_m", 0.0))
+        return f"Moved {direction} by {distance} meters."
+    return ""
+
+
+def _heading_name(yaw_deg: float) -> str:
+    yaw = yaw_deg % 360.0
+    headings = [
+        (0.0, "north"),
+        (90.0, "east"),
+        (180.0, "south"),
+        (270.0, "west"),
+    ]
+    return min(headings, key=lambda item: abs(((yaw - item[0] + 180.0) % 360.0) - 180.0))[1]
 
 
 def _record_action(action: str, params: dict[str, Any], before: dict[str, Any] | None, after: dict[str, Any] | None) -> dict[str, Any]:
@@ -94,43 +106,41 @@ def clear_flight_history(session_id: str) -> None:
 
 @tool
 def get_state() -> str:
-    """Read the current drone state, including PX4 local NED position, relative altitude, speed, and attitude."""
+    """Read the current drone position, relative altitude, and yaw heading."""
     state = get_controller().get_state()
     _record_action("get_state", {}, None, state)
     return json.dumps({"ok": True, "state": _compact_state(state)}, ensure_ascii=False)
 
 @tool
-def takeoff(altitude_m: float = 1.5) -> str:
-    """Climb upward by altitude_m meters relative to the current height, then hold position.
+def takeoff() -> str:
+    """Perform a plain takeoff: climb upward by the default 1.5 meters relative to the current height.
 
-    Use takeoff() for a plain "take off" command. Use takeoff(N) for relative climbs such as
-    "fly up 5 meters" or "climb another 5 meters". altitude_m is NOT a target height above
-    ground, so do not add the current altitude and do not subtract the default takeoff height.
-    If one instruction says "take off and fly/climb/ascend up N meters", call takeoff() first,
-    then call takeoff(N) as the next physical action. Do not replace those two actions with
-    a single takeoff(N) call.
+    This tool has no arguments. For "take off and climb/fly/ascend up N meters", call takeoff()
+    first and then call change_altitude(N). Do not replace those two physical actions with one
+    larger climb.
     """
-    result = get_controller().takeoff(float(altitude_m))
-    entry = _record_action("takeoff", {"altitude_m": float(altitude_m)}, result.get("before"), result.get("after"))
+    result = get_controller().takeoff(DEFAULT_TAKEOFF_ALTITUDE_M)
+    entry = _record_action("takeoff", {"altitude_m": DEFAULT_TAKEOFF_ALTITUDE_M}, result.get("before"), result.get("after"))
     return json.dumps(_compact_action_result(result, entry), ensure_ascii=False)
 
 
 @tool
-def descend(distance_m: float) -> str:
-    """Descend by distance_m meters relative to the current height, then hold position.
+def change_altitude(delta_m: float) -> str:
+    """Change altitude by delta_m meters relative to the current height, then hold position.
 
-    Use this for commands such as "descend 5 meters" or "fly down 5 meters".
-    The tool reads the current state and converts the relative descent into the required
-    positive height above ground for fly_to. Use land() only when the user explicitly asks to land.
+    Positive delta_m climbs upward. Negative delta_m descends downward. Examples:
+    "climb 5 meters" => change_altitude(5); "fly up 4 meters" => change_altitude(4);
+    "descend 5 meters" => change_altitude(-5); "fly down 4 meters" => change_altitude(-4).
+    This is always the requested additional vertical movement, not a target altitude and not the
+    difference from the default takeoff height. After takeoff(), "fly up 5 meters" still means
+    change_altitude(5), not change_altitude(3.5). Use land() only when the user explicitly asks
+    to land.
     """
-    distance = float(distance_m)
-    if distance < 0:
-        return json.dumps({"ok": False, "error": "distance_m must be non-negative."}, ensure_ascii=False)
-
+    delta = float(delta_m)
     controller = get_controller()
     before = controller.get_state()
     current_altitude = float(before.get("relative_altitude_m") or 0.0)
-    target_altitude = max(current_altitude - distance, 0.5)
+    target_altitude = max(current_altitude + delta, 0.5)
     result = controller.fly_to(
         float(before.get("x") or 0.0),
         float(before.get("y") or 0.0),
@@ -139,7 +149,7 @@ def descend(distance_m: float) -> str:
     )
     if "before" not in result:
         result["before"] = before
-    entry = _record_action("descend", {"distance_m": distance}, result.get("before"), result.get("after"))
+    entry = _record_action("change_altitude", {"delta_m": delta}, result.get("before"), result.get("after"))
     return json.dumps(_compact_action_result(result, entry), ensure_ascii=False)
 
 
@@ -152,53 +162,129 @@ def land() -> str:
 
 
 @tool
-def fly_to(x: float, y: float, altitude_m: float, velocity_mps: float = DEFAULT_VELOCITY) -> str:
-    """Fly to absolute PX4 local NED x/y coordinates and a positive height above ground.
+def move_body(direction: str, distance_m: float) -> str:
+    """Move horizontally in the drone body frame while keeping the current yaw and altitude.
 
-    Coordinate rules:
-    - x points north, y points east, and altitude_m is positive height above ground.
-    - Use the latest returned state as the current state. Do not reset the origin to (0, 0).
-    - World-frame directions: north/forward = x+d, south/backward = x-d, east/right = y+d,
-      west/left = y-d. West/east never change x by themselves; north/south never change y by
-      themselves.
-    - Body-frame horizontal movement at yaw theta: forward dx=d*cos(theta), dy=d*sin(theta);
-      backward is the negative of forward; right dx=-d*sin(theta), dy=d*cos(theta); left is
-      the negative of right. Keep altitude unchanged unless vertical movement is requested.
-    - In the drone body's YZ plane, top-right has body_dy=+d*cos(a), ned_dz=-d*sin(a);
-      top-left body_dy=-d*cos(a), ned_dz=-d*sin(a); bottom-right body_dy=+d*cos(a),
-      ned_dz=+d*sin(a); bottom-left body_dy=-d*cos(a), ned_dz=+d*sin(a). Convert body_dy
-      with dx=-body_dy*sin(theta), dy=body_dy*cos(theta), and target altitude=current_altitude-ned_dz.
-
-    Path rules:
-    - A square is a closed four-leg path; preserve the requested leg order.
-    - A repeated square repeats the same four-leg pattern from the current endpoint.
-    - A reverse pass retraces the previous path from the current endpoint using inverse movement
-      vectors in reverse chronological order.
-    - A mirrored/symmetric square reflects both movement and viewing yaw across the named axis:
-      across X, swap east/west; across Y, swap north/south.
-    - A square-loop figure-eight has two closed loops sharing the crossing/start point. Complete
-      exactly four movement legs for the first loop and four for the second; do not insert a
-      repositioning move unless requested.
-    - In world-frame figure-eight placement, left=west, right=east, front=north, rear=south.
-      For compound regions, the first two legs should enter both named components: left-front
-      starting left => west,north,east,south; left-rear starting left => west,south,east,north;
-      right-front starting north => north,east,south,west; right-rear starting south =>
-      south,east,north,west.
+    direction must be one of: forward, backward, right, left. The tool reads the latest yaw and
+    position, converts the body-frame movement to PX4 local NED x/y, and flies there.
+    With yaw 0/north: forward=north, right=east, backward=south, left=west.
+    With yaw 90/east: forward=east, right=south, backward=west, left=north.
+    With yaw 180/south: forward=south, right=west, backward=north, left=east.
+    With yaw 270/west: forward=west, right=north, backward=east, left=south.
     """
-    altitude = float(altitude_m)
-    if altitude < 0:
-        return json.dumps(
-            {
-                "ok": False,
-                "error": "altitude_m must be a positive height above ground. For PX4 NED dz, convert it to altitude_m before calling fly_to.",
-            },
-            ensure_ascii=False,
-        )
-    velocity = float(velocity_mps)
-    result = get_controller().fly_to(float(x), float(y), altitude, velocity_mps=velocity)
+    normalized = direction.strip().lower().replace("-", "_")
+    aliases = {
+        "front": "forward",
+        "forwards": "forward",
+        "back": "backward",
+        "backwards": "backward",
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized not in {"forward", "backward", "right", "left"}:
+        return json.dumps({"ok": False, "error": "direction must be forward, backward, right, or left."}, ensure_ascii=False)
+
+    distance = float(distance_m)
+    if distance < 0:
+        return json.dumps({"ok": False, "error": "distance_m must be non-negative."}, ensure_ascii=False)
+
+    controller = get_controller()
+    before = controller.get_state()
+    yaw_rad = math.radians(float(before.get("yaw_deg") or 0.0))
+    forward_dx = math.cos(yaw_rad)
+    forward_dy = math.sin(yaw_rad)
+    right_dx = -math.sin(yaw_rad)
+    right_dy = math.cos(yaw_rad)
+
+    if normalized == "forward":
+        dx, dy = distance * forward_dx, distance * forward_dy
+    elif normalized == "backward":
+        dx, dy = -distance * forward_dx, -distance * forward_dy
+    elif normalized == "right":
+        dx, dy = distance * right_dx, distance * right_dy
+    else:
+        dx, dy = -distance * right_dx, -distance * right_dy
+
+    target_x = float(before.get("x") or 0.0) + dx
+    target_y = float(before.get("y") or 0.0) + dy
+    altitude = float(before.get("relative_altitude_m") or 0.0)
+    result = controller.fly_to(target_x, target_y, altitude, velocity_mps=DEFAULT_VELOCITY)
+    if "before" not in result:
+        result["before"] = before
     entry = _record_action(
-        "fly_to",
-        {"x": float(x), "y": float(y), "altitude_m": altitude, "velocity_mps": velocity},
+        "move_body",
+        {"direction": normalized, "distance_m": distance},
+        result.get("before"),
+        result.get("after"),
+    )
+    return json.dumps(_compact_action_result(result, entry), ensure_ascii=False)
+
+
+@tool
+def move_body_polar(plane: str, direction: str, angle_deg: float, distance_m: float) -> str:
+    """Move in a body-frame plane using polar coordinates while keeping current yaw.
+
+    plane must be one of: xy, xz, yz. distance_m is the path length.
+    For plane yz, direction must be one of: top_right, top_left, bottom_right, bottom_left.
+    The tool decomposes distance_m into cos(angle_deg) and sin(angle_deg) components.
+    """
+    normalized_plane = plane.strip().lower()
+    normalized_direction = direction.strip().lower().replace("-", "_").replace(" ", "_")
+    if normalized_plane not in {"xy", "xz", "yz"}:
+        return json.dumps({"ok": False, "error": "plane must be xy, xz, or yz."}, ensure_ascii=False)
+
+    distance = float(distance_m)
+    if distance < 0:
+        return json.dumps({"ok": False, "error": "distance_m must be non-negative."}, ensure_ascii=False)
+
+    angle_rad = math.radians(float(angle_deg))
+    first_component_m = distance * math.cos(angle_rad)
+    second_component_m = distance * math.sin(angle_rad)
+    body_forward_m = 0.0
+    body_right_m = 0.0
+    altitude_delta_m = 0.0
+
+    if normalized_plane == "yz":
+        if normalized_direction not in {"top_right", "top_left", "bottom_right", "bottom_left"}:
+            return json.dumps(
+                {"ok": False, "error": "for plane yz, direction must be top_right, top_left, bottom_right, or bottom_left."},
+                ensure_ascii=False,
+            )
+        body_right_m = first_component_m if normalized_direction.endswith("right") else -first_component_m
+        altitude_delta_m = second_component_m if normalized_direction.startswith("top") else -second_component_m
+    elif normalized_plane == "xz":
+        if normalized_direction not in {"top_forward", "top_backward", "bottom_forward", "bottom_backward"}:
+            return json.dumps(
+                {"ok": False, "error": "for plane xz, direction must be top_forward, top_backward, bottom_forward, or bottom_backward."},
+                ensure_ascii=False,
+            )
+        body_forward_m = first_component_m if normalized_direction.endswith("forward") else -first_component_m
+        altitude_delta_m = second_component_m if normalized_direction.startswith("top") else -second_component_m
+    else:
+        if normalized_direction not in {"forward_right", "forward_left", "backward_right", "backward_left"}:
+            return json.dumps(
+                {"ok": False, "error": "for plane xy, direction must be forward_right, forward_left, backward_right, or backward_left."},
+                ensure_ascii=False,
+            )
+        body_forward_m = first_component_m if normalized_direction.startswith("forward") else -first_component_m
+        body_right_m = second_component_m if normalized_direction.endswith("right") else -second_component_m
+
+    controller = get_controller()
+    before = controller.get_state()
+    yaw_rad = math.radians(float(before.get("yaw_deg") or 0.0))
+    forward_dx = math.cos(yaw_rad)
+    forward_dy = math.sin(yaw_rad)
+    right_dx = -math.sin(yaw_rad)
+    right_dy = math.cos(yaw_rad)
+    target_x = float(before.get("x") or 0.0) + body_forward_m * forward_dx + body_right_m * right_dx
+    target_y = float(before.get("y") or 0.0) + body_forward_m * forward_dy + body_right_m * right_dy
+    target_altitude = max(float(before.get("relative_altitude_m") or 0.0) + altitude_delta_m, 0.5)
+
+    result = controller.fly_to(target_x, target_y, target_altitude, velocity_mps=DEFAULT_VELOCITY)
+    if "before" not in result:
+        result["before"] = before
+    entry = _record_action(
+        "move_body_polar",
+        {"plane": normalized_plane, "direction": normalized_direction, "angle_deg": float(angle_deg), "distance_m": distance},
         result.get("before"),
         result.get("after"),
     )
@@ -228,4 +314,4 @@ def set_yaw(yaw_deg: float) -> str:
     return json.dumps(_compact_action_result(result, entry), ensure_ascii=False)
 
 
-DRONE_TOOLS = [takeoff, descend, land, fly_to, set_yaw, get_state]
+DRONE_TOOLS = [takeoff, change_altitude, land, move_body, move_body_polar, set_yaw, get_state]

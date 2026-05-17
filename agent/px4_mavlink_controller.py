@@ -25,6 +25,7 @@ VERTICAL_SETTLE_SPEED_MPS = float(os.getenv("MAVLINK_VERTICAL_SETTLE_SPEED_MPS",
 YAW_RATE_SETTLE_DEGPS = float(os.getenv("MAVLINK_YAW_RATE_SETTLE_DEGPS", "1.0"))
 SETPOINT_MAX_SPEED_MPS = float(os.getenv("MAVLINK_SETPOINT_MAX_SPEED_MPS", "0.8"))
 SETPOINT_MIN_SPEED_MPS = float(os.getenv("MAVLINK_SETPOINT_MIN_SPEED_MPS", "0.08"))
+DEFAULT_TAKEOFF_ALTITUDE_M = 1.5
 SETPOINT_SLOW_RADIUS_M = float(os.getenv("MAVLINK_SETPOINT_SLOW_RADIUS_M", "3.0"))
 SETPOINT_LOOKAHEAD_S = float(os.getenv("MAVLINK_SETPOINT_LOOKAHEAD_S", "0.8"))
 MOVEMENT_TIMEOUT_SCALE = float(os.getenv("MAVLINK_MOVEMENT_TIMEOUT_SCALE", "4.0"))
@@ -117,9 +118,10 @@ class PX4MavlinkController:
         data["timestamp"] = int(time.time())
         return data
 
-    def takeoff(self, altitude_m: float = 1.5, timeout: float = DEFAULT_TIMEOUT) -> dict:
+    def takeoff(self, altitude_m: float = DEFAULT_TAKEOFF_ALTITUDE_M, timeout: float = DEFAULT_TIMEOUT) -> dict:
         self.connect()
-        altitude_m = max(0.5, float(altitude_m))
+        requested_altitude_m = float(altitude_m)
+        altitude_m = DEFAULT_TAKEOFF_ALTITUDE_M
         before = self.get_state()
         start_z = self._require_local_z()
         current = self._snapshot()
@@ -127,6 +129,7 @@ class PX4MavlinkController:
         start_y = current.y or 0.0
         yaw_rad = math.radians(current.yaw_deg or 0.0)
         target_z = start_z - altitude_m
+        altitude_tolerance = min(ALTITUDE_TOLERANCE_M, max(0.03, altitude_m * 0.5))
         movement_timeout = self._movement_timeout(altitude_m, timeout)
 
         self._enter_offboard(start_x, start_y, start_z, yaw_rad)
@@ -135,7 +138,7 @@ class PX4MavlinkController:
 
         reached = self.wait_for_stable_state(
             lambda state: state.z is not None
-            and abs(state.z - target_z) <= ALTITUDE_TOLERANCE_M
+            and abs(state.z - target_z) <= altitude_tolerance
             and self._motion_is_settled(state),
             timeout=movement_timeout,
         )
@@ -149,6 +152,7 @@ class PX4MavlinkController:
             "ok": reached,
             "target_reached": reached,
             "target_delta_altitude_m": altitude_m,
+            "requested_delta_altitude_m": requested_altitude_m,
             "actual_delta_altitude_m": delta,
             "before": before,
             "after": after,
