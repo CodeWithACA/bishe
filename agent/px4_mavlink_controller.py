@@ -81,6 +81,9 @@ class PX4MavlinkController:
         self._hold_lock = threading.Lock()
         self._hold_enabled = False
         self._hold_target: tuple[float, float, float, float, bool] | None = None
+        self._command_lock = threading.Lock()
+        self._command_generation = 0
+        self._command_cancelled = threading.Event()
 
     def connect(self, wait_timeout: float = 30.0) -> None:
         if self._connected:
@@ -120,8 +123,9 @@ class PX4MavlinkController:
 
     def takeoff(self, altitude_m: float = DEFAULT_TAKEOFF_ALTITUDE_M, timeout: float = DEFAULT_TIMEOUT) -> dict:
         self.connect()
+        generation = self._begin_command()
         requested_altitude_m = float(altitude_m)
-        altitude_m = DEFAULT_TAKEOFF_ALTITUDE_M
+        altitude_m = max(0.5, requested_altitude_m)
         before = self.get_state()
         start_z = self._require_local_z()
         current = self._snapshot()
@@ -141,15 +145,18 @@ class PX4MavlinkController:
             and abs(state.z - target_z) <= altitude_tolerance
             and self._motion_is_settled(state),
             timeout=movement_timeout,
+            command_generation=generation,
         )
         after_state = self._snapshot()
-        if after_state.z is not None:
+        cancelled = self._command_is_cancelled(generation)
+        if not cancelled and after_state.z is not None:
             self._set_hold_target(after_state.x or start_x, after_state.y or start_y, after_state.z, yaw_rad, shaped=False)
 
         after = self.get_state()
         delta = None if after_state.z is None else round(start_z - after_state.z, 3)
         return {
             "ok": reached,
+            "cancelled": cancelled,
             "target_reached": reached,
             "target_delta_altitude_m": altitude_m,
             "requested_delta_altitude_m": requested_altitude_m,
@@ -160,6 +167,7 @@ class PX4MavlinkController:
 
     def land(self, timeout: float = DEFAULT_TIMEOUT) -> dict:
         self.connect()
+        generation = self._begin_command()
         before = self.get_state()
         self._hold_enabled = False
         self.set_mode("LAND")
@@ -170,16 +178,19 @@ class PX4MavlinkController:
             )
             and self._motion_is_settled(state),
             timeout=timeout,
+            command_generation=generation,
         )
-        if reached:
+        cancelled = self._command_is_cancelled(generation)
+        if reached and not cancelled:
             try:
                 self.disarm()
             except Exception:
                 pass
-        return {"ok": reached, "target_reached": reached, "before": before, "after": self.get_state()}
+        return {"ok": reached, "cancelled": cancelled, "target_reached": reached, "before": before, "after": self.get_state()}
 
     def fly_to(self, x: float, y: float, altitude_m: float, velocity_mps: float = SETPOINT_MAX_SPEED_MPS, timeout: float = DEFAULT_TIMEOUT) -> dict:
         self.connect()
+        generation = self._begin_command()
         before = self.get_state()
         current = self._snapshot()
         yaw_rad = math.radians(current.yaw_deg or 0.0)
@@ -196,7 +207,9 @@ class PX4MavlinkController:
         self._enter_offboard(start_x, start_y, start_z, yaw_rad)
         self.arm()
         self._hold_enabled = False
-        self._fly_velocity_profile(target_x, target_y, target_z, yaw_rad, max_speed, movement_timeout)
+        self._fly_velocity_profile(target_x, target_y, target_z, yaw_rad, max_speed, movement_timeout, generation)
+        if self._command_is_cancelled(generation):
+            return {"ok": False, "cancelled": True, "target_reached": False, "before": before, "after": self.get_state()}
         self._set_hold_target(target_x, target_y, target_z, yaw_rad)
 
         reached = self.wait_for_stable_state(
@@ -206,11 +219,14 @@ class PX4MavlinkController:
             and math.sqrt((state.x - target_x) ** 2 + (state.y - target_y) ** 2 + (state.z - target_z) ** 2) <= POSITION_TOLERANCE_M
             and self._motion_is_settled(state),
             timeout=movement_timeout,
+            command_generation=generation,
         )
-        return {"ok": reached, "target_reached": reached, "before": before, "after": self.get_state()}
+        cancelled = self._command_is_cancelled(generation)
+        return {"ok": reached, "cancelled": cancelled, "target_reached": reached, "before": before, "after": self.get_state()}
 
     def set_yaw(self, yaw_deg: float, timeout: float = DEFAULT_TIMEOUT) -> dict:
         self.connect()
+        generation = self._begin_command()
         before = self.get_state()
         current = self._snapshot()
         target_yaw = float(yaw_deg) % 360.0
@@ -222,7 +238,9 @@ class PX4MavlinkController:
         self._enter_offboard(x, y, z, target_yaw_rad)
         self.arm()
         self._hold_enabled = False
-        self._turn_yaw_rate_profile(x, y, z, target_yaw, timeout)
+        self._turn_yaw_rate_profile(x, y, z, target_yaw, timeout, generation)
+        if self._command_is_cancelled(generation):
+            return {"ok": False, "cancelled": True, "target_reached": False, "before": before, "after": self.get_state()}
         self._set_hold_target(x, y, z, target_yaw_rad)
 
         reached = self.wait_for_stable_state(
@@ -231,14 +249,50 @@ class PX4MavlinkController:
             and self._motion_is_settled(state)
             and self._yaw_is_settled(state),
             timeout=timeout,
+            command_generation=generation,
         )
         return {
             "ok": reached,
+            "cancelled": self._command_is_cancelled(generation),
             "target_reached": reached,
             "yaw_error_deg": yaw_error_deg((self._snapshot().yaw_deg or 0.0), target_yaw),
             "before": before,
             "after": self.get_state(),
         }
+
+    def cancel_active_command(self) -> int:
+        """Invalidate the current blocking command before another authority takes control."""
+        with self._command_lock:
+            self._command_cancelled.set()
+            self._command_generation += 1
+            return self._command_generation
+
+    def hold_position(self) -> dict:
+        """Cancel active motion and command an immediate hold at the latest local pose."""
+        self.connect()
+        self.cancel_active_command()
+        state = self._snapshot()
+        if state.x is None or state.y is None or state.z is None:
+            raise RuntimeError("local position is unavailable; cannot establish a hold target")
+        yaw_rad = math.radians(state.yaw_deg or 0.0)
+        self._set_hold_target(state.x, state.y, state.z, yaw_rad, shaped=False)
+        for _ in range(5):
+            self._send_position_target(state.x, state.y, state.z, yaw_rad)
+            time.sleep(0.02)
+        if state.mode != "OFFBOARD":
+            self.set_mode("OFFBOARD")
+        return {"ok": True, "state": self.get_state()}
+
+    def set_body_velocity(self, forward_mps: float, right_mps: float, up_mps: float) -> dict:
+        """Send one body-frame manual velocity setpoint; callers must refresh it continuously."""
+        self.connect()
+        with self._hold_lock:
+            self._hold_enabled = False
+        state = self._snapshot()
+        if not state.armed:
+            raise RuntimeError("manual velocity control requires an armed, airborne vehicle")
+        self._send_body_velocity(float(forward_mps), float(right_mps), -float(up_mps))
+        return {"ok": True}
 
     def arm(self) -> None:
         self._command_long(
@@ -283,10 +337,13 @@ class PX4MavlinkController:
         timeout: float = DEFAULT_TIMEOUT,
         interval: float = STABLE_SAMPLE_INTERVAL_S,
         samples: int = STABLE_SAMPLE_COUNT,
+        command_generation: int | None = None,
     ) -> bool:
         deadline = time.time() + timeout
         consecutive = 0
         while time.time() < deadline:
+            if command_generation is not None and self._command_is_cancelled(command_generation):
+                return False
             if predicate(self._snapshot()):
                 consecutive += 1
                 if consecutive >= samples:
@@ -295,6 +352,16 @@ class PX4MavlinkController:
                 consecutive = 0
             time.sleep(interval)
         return False
+
+    def _begin_command(self) -> int:
+        with self._command_lock:
+            self._command_generation += 1
+            self._command_cancelled.clear()
+            return self._command_generation
+
+    def _command_is_cancelled(self, generation: int) -> bool:
+        with self._command_lock:
+            return self._command_cancelled.is_set() or generation != self._command_generation
 
     def _start_threads(self) -> None:
         self._heartbeat_thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
@@ -402,10 +469,13 @@ class PX4MavlinkController:
         yaw_rad: float,
         max_speed: float,
         timeout: float,
+        command_generation: int,
     ) -> None:
         interval = 1.0 / max(VELOCITY_CONTROL_HZ, 2.0)
         deadline = time.time() + timeout
         while time.time() < deadline:
+            if self._command_is_cancelled(command_generation):
+                return
             state = self._snapshot()
             if state.x is None or state.y is None or state.z is None:
                 time.sleep(interval)
@@ -432,12 +502,23 @@ class PX4MavlinkController:
                     vz *= scale
             self._send_local_velocity(vx, vy, vz, yaw_rad)
             time.sleep(interval)
-        self._send_local_velocity(0.0, 0.0, 0.0, yaw_rad)
+        if not self._command_is_cancelled(command_generation):
+            self._send_local_velocity(0.0, 0.0, 0.0, yaw_rad)
 
-    def _turn_yaw_rate_profile(self, x: float, y: float, z: float, target_yaw_deg: float, timeout: float) -> None:
+    def _turn_yaw_rate_profile(
+        self,
+        x: float,
+        y: float,
+        z: float,
+        target_yaw_deg: float,
+        timeout: float,
+        command_generation: int,
+    ) -> None:
         interval = 1.0 / max(YAW_CONTROL_HZ, 2.0)
         deadline = time.time() + timeout
         while time.time() < deadline:
+            if self._command_is_cancelled(command_generation):
+                return
             state = self._snapshot()
             if state.yaw_deg is None:
                 time.sleep(interval)
@@ -451,7 +532,8 @@ class PX4MavlinkController:
             yaw_rate = max(-YAW_CONTROL_MAX_RATE_DEGPS, min(YAW_CONTROL_MAX_RATE_DEGPS, yaw_rate))
             self._send_position_yaw_rate(x, y, z, math.radians(yaw_rate))
             time.sleep(interval)
-        self._send_position_yaw_rate(x, y, z, 0.0)
+        if not self._command_is_cancelled(command_generation):
+            self._send_position_yaw_rate(x, y, z, 0.0)
 
     def _send_position_target(self, x: float, y: float, z: float, yaw_rad: float) -> None:
         assert self.master is not None
@@ -512,6 +594,38 @@ class PX4MavlinkController:
                 0,
                 0,
                 yaw_rad,
+                0,
+            )
+
+    def _send_body_velocity(self, vx: float, vy: float, vz: float) -> None:
+        assert self.master is not None
+        type_mask = (
+            mavutil.mavlink.POSITION_TARGET_TYPEMASK_X_IGNORE
+            | mavutil.mavlink.POSITION_TARGET_TYPEMASK_Y_IGNORE
+            | mavutil.mavlink.POSITION_TARGET_TYPEMASK_Z_IGNORE
+            | mavutil.mavlink.POSITION_TARGET_TYPEMASK_AX_IGNORE
+            | mavutil.mavlink.POSITION_TARGET_TYPEMASK_AY_IGNORE
+            | mavutil.mavlink.POSITION_TARGET_TYPEMASK_AZ_IGNORE
+            | mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_IGNORE
+            | mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE
+        )
+        with self._send_lock:
+            self.master.mav.set_position_target_local_ned_send(
+                int(time.time() * 1000) & 0xFFFFFFFF,
+                self.master.target_system,
+                self.master.target_component,
+                mavutil.mavlink.MAV_FRAME_BODY_NED,
+                type_mask,
+                0,
+                0,
+                0,
+                vx,
+                vy,
+                vz,
+                0,
+                0,
+                0,
+                0,
                 0,
             )
 

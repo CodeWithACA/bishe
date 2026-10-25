@@ -1,14 +1,21 @@
-# PX4/AirSim LangGraph Drone Agent Evaluation
+# PX4/AirSim 无人机 HITL 控制与评测平台
 
-This repository builds a LangGraph-based UAV operation agent and evaluates it against the task/ground-truth format used by CLGSCE.
+本仓库实现一个基于 LangGraph、MCP、PX4 和 AirSim 的无人机人机协同控制平台，并支持 CLGSCE 风格任务评测。
 
-The project started as a small Flask AI chat UI, but its current main purpose is:
+当前网页提供两种控制模式：
 
-1. Run an LLM drone agent with tool calls such as `takeoff`, `fly_to`, `set_yaw`, `land`, and `get_state`.
-2. Control PX4 SITL through MAVLink while AirSim provides the simulator environment.
-3. Execute CLGSCE-style natural-language UAV tasks.
-4. Log tool-level flight actions.
-5. Compare observed state transitions with CLGSCE ground truth.
+- **人工操控**：WASD 连续水平飞行，滚轮升降，松开或链路超时后悬停。
+- **AI 任务**：模型先生成结构化任务概要，用户批准后逐步执行，高风险步骤会再次等待确认。
+
+控制权由服务端仲裁，固定优先级为 `SAFETY > MANUAL > AGENT`。人工接管不依赖模型判断：服务端会直接取消当前 AI 动作、建立悬停并终止原任务。
+
+平台的主要能力包括：
+
+1. 通过 MCP 资源与工具管理命名地点、飞行动作和设备能力。
+2. 使用 LangGraph 检查点和中断实现任务级与步骤级 HITL。
+3. 通过 WebSocket 提供带断连悬停保护的人工连续控制。
+4. 通过 MAVLink 控制 PX4 SITL，并由 AirSim 提供仿真环境和画面。
+5. 保存任务、审批、步骤结果和审计事件，并运行 CLGSCE 风格评测。
 
 ## Related Paper And Repository
 
@@ -66,6 +73,21 @@ agent/
   tools.py                    LLM tools and compact flight history
   px4_mavlink_controller.py   PX4/MAVLink control implementation
 
+control/
+  arbiter.py                  控制权租约与优先级仲裁
+  service.py                  人工接管、悬停和连续速度控制
+
+domain/
+  registry.py                 地点、设备与飞行能力注册表
+
+mission/
+  planner.py                  只规划不执行的结构化任务生成器
+  service.py                  LangGraph 审批与逐步执行工作流
+  store.py                    SQLite 任务和审计记录
+
+config/capabilities.yaml      地点、设备、风险和确认策略
+mcp_server.py                 MCP v2 Streamable HTTP 服务
+
 airsim/
   client.py                   Direct MessagePack-RPC AirSim client
   capture_image.py            Capture an AirSim camera frame
@@ -85,8 +107,9 @@ utils/
   reset_airsim.py             Reset AirSim through RPC
   start_px4_wsl.py            Older direct WSL PX4 launcher
 
-app.py                        Flask UI with chat and AirSim video/telemetry endpoints
-templates/index.html          Browser UI
+app.py                        FastAPI/ASGI 应用、REST、WebSocket 和 AirSim 接口
+templates/index.html          网页结构
+static/                       控制台样式与交互逻辑
 mavlink_bridge/               MAVLink utility bridge and notes
 ```
 
@@ -121,6 +144,7 @@ MAVLINK_CONNECTION=udpin:0.0.0.0:14540
 MAVLINK_COMMAND_TIMEOUT=30
 PX4_SERVER_URL=http://localhost:8765
 PX4_DIR=/home/hw/px4v1.15.2
+UAV_DATA_DIR=./data
 ```
 
 Do not commit `.env`.
@@ -175,7 +199,7 @@ Run one free-form agent task and print every LLM/tool step:
 python -m utils.drone_cli "Fly 5 meters up, then fly 4 meters down."
 ```
 
-Run the Flask UI:
+运行 FastAPI 控制台：
 
 ```powershell
 python app.py
@@ -187,13 +211,29 @@ Open:
 http://127.0.0.1:5000
 ```
 
-The UI includes chat plus AirSim video/telemetry endpoints:
+控制台包含任务规划、人工操控以及 AirSim 视频/遥测接口：
 
 ```text
 /api/airsim/views
 /api/airsim/stream
 /api/airsim/telemetry
 ```
+
+任务与人工控制接口：
+
+```text
+POST /api/missions
+POST /api/missions/{id}/approve
+POST /api/missions/{id}/revise
+POST /api/missions/{id}/cancel
+POST /api/control/takeover
+POST /api/control/hold
+WS   /ws/control
+WS   /ws/events
+POST /mcp
+```
+
+任务数据默认保存在 `data/missions.sqlite3`，LangGraph 检查点保存在 `data/checkpoints.sqlite3`。服务重启时，处于执行中的任务会被标记为失败，不会自动续飞。
 
 ## Single-Task Evaluation
 
@@ -317,6 +357,11 @@ average_completeness
 ```
 
 ## Important Notes
+
+- AI 规划阶段没有可变更工具；用户批准后，任务动作才通过 MCP 工具执行。
+- 起飞、降落及 `capabilities.yaml` 中标记为高风险的动作需要步骤级复核。
+- 人工连续控制不经过 MCP，而是走 20 Hz WebSocket；两类控制最终使用同一个控制权仲裁器。
+- 300 ms 未收到人工速度帧或 WebSocket 断开时，服务端会建立位置悬停。
 
 - The LLM sees compact tool results only, not full telemetry dumps. This keeps context size under control.
 - The agent's tools use LLM-friendly arguments such as `takeoff(altitude_m)` and `fly_to(x, y, altitude_m)`.

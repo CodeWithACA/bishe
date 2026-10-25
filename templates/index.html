@@ -1,991 +1,186 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AirSim AI Control</title>
-    <style>
-      :root {
-        --bg: #101820;
-        --panel: #17232d;
-        --panel-2: #1e2d38;
-        --panel-3: #233644;
-        --text: #edf6f9;
-        --muted: #9fb3c1;
-        --line: #314653;
-        --accent: #2dd4bf;
-        --accent-2: #f59e0b;
-        --danger: #fb7185;
-        --user: #d9f99d;
-        --assistant: #263846;
-        --shadow: 0 20px 45px rgba(0, 0, 0, 0.28);
-      }
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#071018">
+  <title>无人机任务控制台</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <a class="skip-link" href="#mainContent">跳到主要内容</a>
+  <main id="mainContent" class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path d="M7.2 8.1 9.8 10m4.4 0 2.6-1.9M7.2 15.9 9.8 14m4.4 0 2.6 1.9M12 9.8v4.4M9.8 12h4.4"/>
+            <circle cx="5" cy="6.5" r="2.4"/><circle cx="19" cy="6.5" r="2.4"/>
+            <circle cx="5" cy="17.5" r="2.4"/><circle cx="19" cy="17.5" r="2.4"/>
+            <rect x="9.3" y="9.3" width="5.4" height="5.4" rx="1"/>
+          </svg>
+        </div>
+        <div>
+          <div class="eyebrow">PX4 / AirSim · Flight Operations</div>
+          <h1>无人机任务控制台</h1>
+        </div>
+      </div>
+      <div class="top-meta">
+        <div class="utc"><span class="eyebrow">本地时间</span><b id="clock">--:--:--</b></div>
+        <div id="airsimStatus" class="status-pill" role="status">
+          <span class="dot" aria-hidden="true"></span><span id="airsimStatusText">正在连接</span>
+        </div>
+      </div>
+    </header>
 
-      * {
-        box-sizing: border-box;
-      }
+    <section id="authorityRail" class="authority-rail" data-authority="IDLE" aria-label="当前控制权">
+      <div class="authority-identity">
+        <span class="eyebrow">控制权</span>
+        <strong id="authorityName">待命</strong>
+      </div>
+      <div class="custody-switch" aria-label="控制权优先级：安全系统优先于人工，人工优先于 AI">
+        <span data-state="MANUAL"><i aria-hidden="true"></i>人工</span>
+        <span data-state="AGENT"><i aria-hidden="true"></i>AI</span>
+        <span data-state="SAFETY"><i aria-hidden="true"></i>安全</span>
+      </div>
+      <p id="authorityReason" class="authority-reason">尚未授予控制权</p>
+      <div class="authority-actions">
+        <button id="takeoverBtn" class="button danger hidden" type="button">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v10m0 0 4-4m-4 4-4-4M5 15v4h14v-4"/></svg>
+          接管控制
+        </button>
+        <button id="holdBtn" class="button hold-button" type="button">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7h3v10H8zm5 0h3v10h-3z"/></svg>
+          立即悬停
+        </button>
+      </div>
+    </section>
 
-      body {
-        margin: 0;
-        height: 100vh;
-        overflow: hidden;
-        background:
-          linear-gradient(135deg, rgba(45, 212, 191, 0.08), transparent 28%),
-          linear-gradient(315deg, rgba(245, 158, 11, 0.1), transparent 24%),
-          var(--bg);
-        color: var(--text);
-        font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-      }
-
-      button,
-      select,
-      input,
-      textarea {
-        font: inherit;
-      }
-
-      button,
-      select,
-      input {
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        background: var(--panel-2);
-        color: var(--text);
-      }
-
-      button {
-        cursor: pointer;
-        padding: 9px 12px;
-        transition: 0.16s ease;
-      }
-
-      button:hover:enabled {
-        border-color: var(--accent);
-        transform: translateY(-1px);
-      }
-
-      button:disabled {
-        cursor: not-allowed;
-        opacity: 0.6;
-      }
-
-      .app-shell {
-        display: grid;
-        grid-template-columns: minmax(520px, 1.08fr) minmax(440px, 0.92fr);
-        gap: 14px;
-        height: 100vh;
-        padding: 14px;
-      }
-
-      .panel {
-        min-height: 0;
-        border: 1px solid var(--line);
-        border-radius: 10px;
-        background: rgba(23, 35, 45, 0.9);
-        box-shadow: var(--shadow);
-      }
-
-      .flight-panel {
-        display: grid;
-        grid-template-rows: auto minmax(280px, 1fr) auto;
-        overflow: hidden;
-      }
-
-      .panel-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 12px;
-        padding: 14px 16px;
-        border-bottom: 1px solid var(--line);
-      }
-
-      .title-block h1,
-      .title-block h2,
-      .title-block p {
-        margin: 0;
-      }
-
-      .title-block h1,
-      .title-block h2 {
-        font-size: 18px;
-        line-height: 1.2;
-      }
-
-      .title-block p,
-      .status,
-      .hint {
-        color: var(--muted);
-        font-size: 12px;
-      }
-
-      .connection-pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        min-width: 96px;
-        justify-content: center;
-        padding: 7px 10px;
-        border: 1px solid var(--line);
-        border-radius: 999px;
-        color: var(--muted);
-        font-size: 12px;
-      }
-
-      .connection-dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: var(--danger);
-      }
-
-      .connection-pill.online .connection-dot {
-        background: var(--accent);
-      }
-
-      .flight-actions {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-      }
-
-      .view-switch {
-        display: inline-flex;
-        overflow: hidden;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        background: rgba(16, 24, 32, 0.58);
-      }
-
-      .view-button {
-        min-width: 72px;
-        border: 0;
-        border-radius: 0;
-        background: transparent;
-        color: var(--muted);
-      }
-
-      .view-button + .view-button {
-        border-left: 1px solid var(--line);
-      }
-
-      .view-button.active {
-        background: var(--accent);
-        color: #06201d;
-        font-weight: 650;
-      }
-
-      .video-stage {
-        position: relative;
-        min-height: 0;
-        background: #071016;
-      }
-
-      .video-stream {
-        width: 100%;
-        height: 100%;
-        display: block;
-        object-fit: cover;
-      }
-
-      .video-overlay {
-        position: absolute;
-        inset: 0;
-        pointer-events: none;
-        background:
-          linear-gradient(rgba(237, 246, 249, 0.06) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(237, 246, 249, 0.04) 1px, transparent 1px);
-        background-size: 48px 48px;
-        mix-blend-mode: screen;
-        opacity: 0.35;
-      }
-
-      .hud-strip {
-        position: absolute;
-        left: 14px;
-        right: 14px;
-        bottom: 14px;
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 10px;
-      }
-
-      .hud-item,
-      .telemetry-card,
-      .attitude-card {
-        border: 1px solid rgba(159, 179, 193, 0.22);
-        border-radius: 8px;
-        background: rgba(16, 24, 32, 0.76);
-        backdrop-filter: blur(8px);
-      }
-
-      .hud-item {
-        padding: 10px;
-      }
-
-      .metric-label {
-        display: block;
-        color: var(--muted);
-        font-size: 11px;
-        text-transform: uppercase;
-      }
-
-      .metric-value {
-        display: block;
-        margin-top: 4px;
-        font-size: 20px;
-        font-weight: 650;
-      }
-
-      .telemetry-grid {
-        display: grid;
-        grid-template-columns: 1.2fr 0.8fr;
-        gap: 12px;
-        padding: 14px;
-        border-top: 1px solid var(--line);
-      }
-
-      .telemetry-card {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 10px;
-        padding: 12px;
-      }
-
-      .attitude-card {
-        display: grid;
-        grid-template-columns: 104px 1fr;
-        gap: 12px;
-        align-items: center;
-        padding: 12px;
-      }
-
-      .attitude-ball {
-        position: relative;
-        width: 92px;
-        aspect-ratio: 1;
-        overflow: hidden;
-        border: 2px solid rgba(237, 246, 249, 0.8);
-        border-radius: 50%;
-        background: linear-gradient(#38bdf8 0 50%, #8b5e34 50% 100%);
-      }
-
-      .attitude-ball::before,
-      .attitude-ball::after {
-        content: "";
-        position: absolute;
-        left: 16%;
-        right: 16%;
-        top: 50%;
-        height: 2px;
-        background: #edf6f9;
-      }
-
-      .attitude-ball::after {
-        left: 50%;
-        right: auto;
-        top: 18%;
-        bottom: 18%;
-        width: 2px;
-        height: auto;
-      }
-
-      .attitude-readout {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 8px;
-      }
-
-      .chat-panel {
-        display: grid;
-        grid-template-rows: auto minmax(120px, 1fr) auto auto;
-        overflow: hidden;
-      }
-
-      .chat-toolbar {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 10px;
-        padding: 12px 16px;
-        border-bottom: 1px solid var(--line);
-      }
-
-      .field {
-        display: grid;
-        gap: 5px;
-        min-width: 0;
-      }
-
-      .field label {
-        color: var(--muted);
-        font-size: 11px;
-        text-transform: uppercase;
-      }
-
-      .field select,
-      .field input {
-        width: 100%;
-        min-width: 0;
-        padding: 9px 10px;
-      }
-
-      .messages {
-        min-height: 0;
-        overflow: auto;
-        display: grid;
-        align-content: start;
-        gap: 12px;
-        padding: 16px;
-      }
-
-      .message {
-        max-width: min(84%, 720px);
-        padding: 12px 14px;
-        border-radius: 8px;
-        line-height: 1.65;
-        white-space: pre-wrap;
-        word-break: break-word;
-        animation: fadeUp 0.18s ease;
-      }
-
-      .message.user {
-        margin-left: auto;
-        color: #203012;
-        background: var(--user);
-      }
-
-      .message.assistant {
-        background: var(--assistant);
-      }
-
-      .message.pending {
-        color: var(--muted);
-      }
-
-      .session-panel {
-        display: grid;
-        gap: 10px;
-        padding: 12px 16px;
-        border-top: 1px solid var(--line);
-      }
-
-      .session-actions {
-        display: flex;
-        gap: 8px;
-      }
-
-      .session-list {
-        display: flex;
-        gap: 8px;
-        overflow-x: auto;
-        padding-bottom: 2px;
-      }
-
-      .session-row {
-        display: flex;
-        gap: 6px;
-        flex: 0 0 auto;
-      }
-
-      .session-item {
-        max-width: 160px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
-      .session-item.active {
-        border-color: var(--accent);
-        color: var(--accent);
-      }
-
-      .session-delete {
-        color: var(--danger);
-      }
-
-      .composer {
-        display: grid;
-        gap: 10px;
-        padding: 14px 16px 16px;
-        border-top: 1px solid var(--line);
-      }
-
-      .composer textarea {
-        width: 100%;
-        min-height: 92px;
-        resize: vertical;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 12px;
-        background: #0f1921;
-        color: var(--text);
-      }
-
-      .composer-footer {
-        display: flex;
-        justify-content: flex-end;
-        gap: 10px;
-      }
-
-      .primary {
-        border-color: rgba(45, 212, 191, 0.5);
-        background: var(--accent);
-        color: #06201d;
-        font-weight: 650;
-      }
-
-      @keyframes fadeUp {
-        from {
-          opacity: 0;
-          transform: translateY(4px);
-        }
-        to {
-          opacity: 1;
-          transform: translateY(0);
-        }
-      }
-
-      @media (max-width: 1050px) {
-        body {
-          height: auto;
-          overflow: auto;
-        }
-
-        .app-shell {
-          grid-template-columns: 1fr;
-          height: auto;
-          min-height: 100vh;
-        }
-
-        .flight-panel {
-          min-height: 720px;
-        }
-
-        .chat-panel {
-          min-height: 720px;
-        }
-      }
-    </style>
-  </head>
-  <body>
-    <div class="app-shell">
-      <section class="panel flight-panel">
-        <header class="panel-header">
-          <div class="title-block">
-            <h1>AirSim Flight Monitor</h1>
-            <p>Live camera feed with expandable telemetry surfaces</p>
+    <div class="workspace">
+      <section class="panel flight-panel" aria-labelledby="flightTitle">
+        <header class="panel-head">
+          <div>
+            <div class="section-kicker">CAMERA / MANUAL FLIGHT</div>
+            <h2 id="flightTitle" class="panel-title">实时飞行画面</h2>
           </div>
-          <div class="flight-actions">
-            <div class="view-switch" aria-label="Camera view">
-              <button class="view-button active" type="button" data-view="front">前视</button>
-              <button class="view-button" type="button" data-view="down">下视</button>
+          <div class="head-actions">
+            <div class="mode-switch" aria-label="控制模式">
+              <button id="aiModeBtn" class="mode-button active" type="button" aria-pressed="true">AI 任务</button>
+              <button id="manualModeBtn" class="mode-button" type="button" aria-pressed="false">人工操控</button>
             </div>
-            <div id="airsimStatus" class="connection-pill">
-              <span class="connection-dot"></span>
-              <span id="airsimStatusText">Connecting</span>
+            <div class="view-switch" aria-label="相机视角">
+              <button class="view-button active" type="button" data-view="front" aria-pressed="true">前视</button>
+              <button class="view-button" type="button" data-view="down" aria-pressed="false">下视</button>
             </div>
           </div>
         </header>
 
-        <div class="video-stage">
-          <img id="airsimVideo" class="video-stream" src="/api/airsim/stream?view=front&fps=15" alt="AirSim live camera" />
-          <div class="video-overlay"></div>
-          <div class="hud-strip">
-            <div class="hud-item">
-              <span class="metric-label">Altitude</span>
-              <span id="altitudeValue" class="metric-value">-- m</span>
-            </div>
-            <div class="hud-item">
-              <span class="metric-label">Speed</span>
-              <span id="speedValue" class="metric-value">-- m/s</span>
-            </div>
-            <div class="hud-item">
-              <span class="metric-label">Heading</span>
-              <span id="headingValue" class="metric-value">-- deg</span>
-            </div>
-            <div class="hud-item">
-              <span class="metric-label">Vertical</span>
-              <span id="verticalSpeedValue" class="metric-value">-- m/s</span>
-            </div>
+        <div id="videoStage" class="video-stage" tabindex="0" aria-label="人工飞行控制区，点击后使用 WASD，滚轮控制升降">
+          <img id="airsimVideo" class="video-stream" src="/api/airsim/stream?view=front&amp;fps=15" alt="AirSim 实时飞行画面">
+          <div class="video-vignette" aria-hidden="true"></div>
+          <div class="scanlines" aria-hidden="true"></div>
+          <div class="camera-tag" id="cameraTag"><span class="record-dot" aria-hidden="true"></span>CAM 01 · FRONT</div>
+          <div class="heading-tape" aria-hidden="true">
+            <div id="headingTrack" class="heading-track"><span>300</span><span>330</span><span class="north">N</span><span>030</span><span>060</span><span>090</span><span>120</span><span>150</span><span>180</span></div>
+          </div>
+          <div class="reticle" aria-hidden="true"></div>
+          <div id="manualOverlay" class="manual-overlay hidden">
+            <span id="controlFocus">点击画面启用键盘控制</span>
+            <div class="keymap"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><b>滚轮升降</b></div>
+          </div>
+          <div class="hud" aria-label="核心飞行数据">
+            <div class="hud-item"><span class="metric-label">高度 AGL</span><span id="altitudeValue" class="metric-value">-- m</span></div>
+            <div class="hud-item"><span class="metric-label">地速</span><span id="speedValue" class="metric-value">-- m/s</span></div>
+            <div class="hud-item"><span class="metric-label">航向</span><span id="headingValue" class="metric-value">--°</span></div>
+            <div class="hud-item"><span class="metric-label">垂直速度</span><span id="verticalSpeedValue" class="metric-value">-- m/s</span></div>
           </div>
         </div>
 
-        <div class="telemetry-grid">
-          <div class="telemetry-card">
-            <div>
-              <span class="metric-label">Latitude</span>
-              <span id="latitudeValue" class="metric-value">--</span>
+        <div class="flight-deck">
+          <div class="manual-actions">
+            <div class="manual-action-buttons">
+              <button id="takeoffBtn" class="button primary" disabled>起飞至 1.5 m</button>
+              <button id="landBtn" class="button" disabled>降落</button>
             </div>
-            <div>
-              <span class="metric-label">Longitude</span>
-              <span id="longitudeValue" class="metric-value">--</span>
-            </div>
-            <div>
-              <span class="metric-label">Link</span>
-              <span id="linkValue" class="metric-value">--</span>
-            </div>
+            <span id="controlLink" class="control-link"><i aria-hidden="true"></i>控制链路未启用</span>
           </div>
-          <div class="attitude-card">
-            <div id="attitudeBall" class="attitude-ball"></div>
-            <div class="attitude-readout">
-              <div>
-                <span class="metric-label">Roll</span>
-                <span id="rollValue" class="metric-value">--</span>
-              </div>
-              <div>
-                <span class="metric-label">Pitch</span>
-                <span id="pitchValue" class="metric-value">--</span>
-              </div>
-              <div>
-                <span class="metric-label">Yaw</span>
-                <span id="yawValue" class="metric-value">--</span>
+          <div class="data-deck">
+            <div class="telemetry-card">
+              <div><span class="metric-label">纬度</span><span id="latitudeValue" class="metric-value">--</span></div>
+              <div><span class="metric-label">经度</span><span id="longitudeValue" class="metric-value">--</span></div>
+              <div><span class="metric-label">数据链路</span><span id="linkValue" class="metric-value">--</span></div>
+            </div>
+            <div class="attitude-card">
+              <div id="attitudeBall" class="attitude-ball" aria-hidden="true"></div>
+              <div class="attitude-readout">
+                <div><span class="metric-label">横滚</span><span id="rollValue" class="metric-value">--°</span></div>
+                <div><span class="metric-label">俯仰</span><span id="pitchValue" class="metric-value">--°</span></div>
+                <div><span class="metric-label">偏航</span><span id="yawValue" class="metric-value">--°</span></div>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      <section class="panel chat-panel">
-        <header class="panel-header">
-          <div class="title-block">
-            <h2 id="sessionTitle">未命名会话</h2>
-            <p>AI command channel</p>
+      <section class="panel mission-panel" aria-labelledby="missionTitle">
+        <header class="panel-head mission-head">
+          <div>
+            <div class="section-kicker">MISSION / HUMAN REVIEW</div>
+            <h2 id="missionTitle" class="panel-title">任务编排与审批</h2>
           </div>
-          <div class="status" id="status">就绪</div>
+          <div id="missionStatus" class="mission-status" role="status"><span aria-hidden="true"></span>等待任务</div>
         </header>
 
-        <div class="chat-toolbar">
-          <div class="field">
-            <label for="modelSelect">Model</label>
-            <select id="modelSelect">
-              {% for model in model_options %}
-              <option value="{{ model }}" {% if model == default_model %}selected{% endif %}>{{ model }}</option>
-              {% endfor %}
-            </select>
+        <section class="composer" aria-label="创建 AI 任务">
+          <label class="composer-label" for="missionInput">告诉 AI 需要完成什么</label>
+          <textarea id="missionInput" rows="3" placeholder="例如：起飞后前往学校，在到达后打开应急照明。"></textarea>
+          <div class="prompt-chips" aria-label="任务示例">
+            <button class="prompt-chip" type="button" data-prompt="起飞至 5 米并保持悬停。">起飞并悬停</button>
+            <button class="prompt-chip" type="button" data-prompt="前往学校，到达后保持悬停。">前往学校</button>
+            <button class="prompt-chip" type="button" data-prompt="前往学校并打开应急照明。">巡航并开灯</button>
           </div>
-          <div class="field">
-            <label for="urlSelect">Endpoint</label>
-            <select id="urlSelect">
-              <option value="{{ global_url }}" {% if default_url == global_url %}selected{% endif %}>Global / SILICONFLOW_URL</option>
-              <option value="{{ cn_url }}" {% if default_url == cn_url %}selected{% endif %}>CN / SILICONFLOW_URL_CN</option>
-            </select>
-          </div>
-          <div class="field" style="grid-column: 1 / -1">
-            <label for="urlInput">Current URL</label>
-            <input id="urlInput" value="{{ default_url }}" readonly />
-          </div>
-        </div>
-
-        <section id="messages" class="messages"></section>
-
-        <div class="session-panel">
-          <div class="session-actions">
-            <button id="newSessionBtn" class="primary">新建会话</button>
-            <button id="clearHistoryBtn">清空当前对话</button>
-          </div>
-          <div id="sessionList" class="session-list"></div>
-        </div>
-
-        <section class="composer">
-          <textarea id="messageInput" placeholder="输入消息，按 Enter 发送，Shift + Enter 换行"></textarea>
           <div class="composer-footer">
-            <button id="sendBtn" class="primary">发送</button>
+            <span class="hint">Enter 生成 · Shift + Enter 换行</span>
+            <button id="planBtn" class="button primary">生成任务概要</button>
           </div>
+        </section>
+
+        <section id="missionView" class="mission-view" aria-label="当前任务">
+          <div class="empty-state">
+            <div class="empty-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M6 3h9l3 3v15H6zM9 10h6M9 14h6M9 18h4M15 3v4h4"/></svg>
+            </div>
+            <div><b>先生成任务概要，再决定是否执行。</b><span>规划阶段不会驱动无人机。你确认计划后，系统才会逐步申请控制权。</span></div>
+          </div>
+        </section>
+
+        <details class="runtime-settings">
+          <summary>
+            <span>运行设置</span>
+            <span class="settings-summary">模型与服务节点</span>
+          </summary>
+          <div class="config">
+            <div class="field">
+              <label for="modelSelect">推理模型</label>
+              <select id="modelSelect">{% for model in model_options %}<option value="{{ model }}" {% if model == default_model %}selected{% endif %}>{{ model }}</option>{% endfor %}</select>
+            </div>
+            <div class="field">
+              <label for="urlSelect">服务节点</label>
+              <select id="urlSelect"><option value="{{ global_url }}" {% if default_url == global_url %}selected{% endif %}>Global</option><option value="{{ cn_url }}" {% if default_url == cn_url %}selected{% endif %}>中国大陆</option></select>
+            </div>
+          </div>
+        </details>
+
+        <section class="mission-history" aria-label="最近任务">
+          <div class="history-head"><span class="metric-label">最近任务</span><button id="refreshMissionsBtn" class="text-button" type="button">刷新</button></div>
+          <div id="missionList" class="mission-list"></div>
         </section>
       </section>
     </div>
+  </main>
 
-    <script>
-      const storageKey = "simple-ai-chat-sessions";
-      const activeKey = "simple-ai-chat-active";
-
-      const modelSelect = document.getElementById("modelSelect");
-      const urlSelect = document.getElementById("urlSelect");
-      const urlInput = document.getElementById("urlInput");
-      const sessionList = document.getElementById("sessionList");
-      const sessionTitle = document.getElementById("sessionTitle");
-      const messagesEl = document.getElementById("messages");
-      const messageInput = document.getElementById("messageInput");
-      const statusEl = document.getElementById("status");
-      const sendBtn = document.getElementById("sendBtn");
-      const clearHistoryBtn = document.getElementById("clearHistoryBtn");
-      const airsimVideo = document.getElementById("airsimVideo");
-      const viewButtons = document.querySelectorAll(".view-button");
-
-      const telemetryEls = {
-        status: document.getElementById("airsimStatus"),
-        statusText: document.getElementById("airsimStatusText"),
-        altitude: document.getElementById("altitudeValue"),
-        speed: document.getElementById("speedValue"),
-        heading: document.getElementById("headingValue"),
-        verticalSpeed: document.getElementById("verticalSpeedValue"),
-        latitude: document.getElementById("latitudeValue"),
-        longitude: document.getElementById("longitudeValue"),
-        link: document.getElementById("linkValue"),
-        roll: document.getElementById("rollValue"),
-        pitch: document.getElementById("pitchValue"),
-        yaw: document.getElementById("yawValue"),
-        ball: document.getElementById("attitudeBall")
-      };
-
-      function readSessions() {
-        try {
-          return JSON.parse(localStorage.getItem(storageKey) || "[]");
-        } catch {
-          return [];
-        }
-      }
-
-      function writeSessions(sessions) {
-        localStorage.setItem(storageKey, JSON.stringify(sessions));
-      }
-
-      function switchCameraView(view) {
-        const nextView = view === "down" ? "down" : "front";
-        viewButtons.forEach((button) => {
-          button.classList.toggle("active", button.dataset.view === nextView);
-        });
-        airsimVideo.src = `/api/airsim/stream?view=${encodeURIComponent(nextView)}&fps=15&t=${Date.now()}`;
-      }
-
-      function getActiveId() {
-        return localStorage.getItem(activeKey);
-      }
-
-      function setActiveId(id) {
-        localStorage.setItem(activeKey, id);
-      }
-
-      function createSession() {
-        const now = new Date();
-        return {
-          id: crypto.randomUUID(),
-          title: `新会话 ${now.toLocaleString()}`,
-          messages: [],
-          createdAt: now.toISOString()
-        };
-      }
-
-      function ensureSession() {
-        let sessions = readSessions();
-        const activeId = getActiveId();
-        let active = sessions.find((item) => item.id === activeId);
-
-        if (!active) {
-          if (sessions.length) {
-            active = sessions[0];
-            setActiveId(active.id);
-            return active;
-          }
-
-          active = createSession();
-          sessions.unshift(active);
-          writeSessions(sessions);
-          setActiveId(active.id);
-        }
-
-        return active;
-      }
-
-      function updateSession(mutator) {
-        const sessions = readSessions();
-        const activeId = getActiveId();
-        const next = sessions.map((item) => {
-          if (item.id !== activeId) {
-            return item;
-          }
-          return mutator(item);
-        });
-        writeSessions(next);
-      }
-
-      function deleteSession(id) {
-        const sessions = readSessions().filter((session) => session.id !== id);
-        writeSessions(sessions);
-
-        if (!sessions.length) {
-          const next = createSession();
-          writeSessions([next]);
-          setActiveId(next.id);
-        } else if (getActiveId() === id) {
-          setActiveId(sessions[0].id);
-        }
-
-        renderAll();
-      }
-
-      function renderSessions() {
-        const sessions = readSessions();
-        const activeId = getActiveId();
-        sessionList.innerHTML = "";
-
-        sessions.forEach((session) => {
-          const row = document.createElement("div");
-          row.className = "session-row";
-
-          const button = document.createElement("button");
-          button.className = `session-item${session.id === activeId ? " active" : ""}`;
-          button.textContent = session.title;
-          button.title = session.title;
-          button.onclick = () => {
-            setActiveId(session.id);
-            renderAll();
-          };
-
-          const deleteButton = document.createElement("button");
-          deleteButton.className = "session-delete";
-          deleteButton.textContent = "删";
-          deleteButton.title = "删除会话";
-          deleteButton.onclick = (event) => {
-            event.stopPropagation();
-            deleteSession(session.id);
-          };
-
-          row.appendChild(button);
-          row.appendChild(deleteButton);
-          sessionList.appendChild(row);
-        });
-      }
-
-      function renderMessages() {
-        const session = ensureSession();
-        sessionTitle.textContent = session.title;
-        messagesEl.innerHTML = "";
-
-        if (!session.messages.length) {
-          const empty = document.createElement("div");
-          empty.className = "status";
-          empty.textContent = "当前会话还没有消息。";
-          messagesEl.appendChild(empty);
-          return;
-        }
-
-        session.messages.forEach((message) => {
-          const div = document.createElement("div");
-          div.className = `message ${message.role}${message.pending ? " pending" : ""}`;
-          div.textContent = message.content;
-          messagesEl.appendChild(div);
-        });
-
-        messagesEl.scrollTop = messagesEl.scrollHeight;
-      }
-
-      function renderAll() {
-        renderSessions();
-        renderMessages();
-      }
-
-      function updateLastAssistantBubble(content, pending = false) {
-        const nodes = messagesEl.querySelectorAll(".message.assistant");
-        const lastNode = nodes[nodes.length - 1];
-        if (!lastNode) {
-          renderMessages();
-          return;
-        }
-
-        lastNode.textContent = content;
-        lastNode.classList.toggle("pending", pending);
-        messagesEl.scrollTop = messagesEl.scrollHeight;
-      }
-
-      function setBusy(busy, text) {
-        sendBtn.disabled = busy;
-        clearHistoryBtn.disabled = busy;
-        statusEl.textContent = text;
-      }
-
-      async function readErrorMessage(response) {
-        const raw = await response.text();
-
-        try {
-          const data = JSON.parse(raw);
-          return data.error || raw || "请求失败";
-        } catch {
-          return raw || "请求失败";
-        }
-      }
-
-      function currentHistory() {
-        return ensureSession().messages
-          .filter((item) => !item.pending)
-          .map(({ role, content }) => ({ role, content }));
-      }
-
-      async function sendMessage() {
-        const message = messageInput.value.trim();
-        if (!message) {
-          return;
-        }
-
-        updateSession((session) => {
-          const title = session.messages.length === 0 ? message.slice(0, 18) : session.title;
-          return {
-            ...session,
-            title,
-            messages: [...session.messages, { role: "user", content: message }]
-          };
-        });
-
-        messageInput.value = "";
-        updateSession((session) => ({
-          ...session,
-          messages: [
-            ...session.messages,
-            { role: "assistant", content: "正在思考...", pending: true }
-          ]
-        }));
-
-        try {
-          renderAll();
-          setBusy(true, "AI 思考中...");
-
-          const response = await fetch("/api/chat/stream", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-              message,
-              model: modelSelect.value,
-              baseUrl: urlInput.value,
-              history: currentHistory().slice(0, -1),
-              sessionId: getActiveId()
-            })
-          });
-
-          if (!response.ok) {
-            throw new Error(await readErrorMessage(response));
-          }
-
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder("utf-8");
-          let fullText = "";
-
-          while (true) {
-            const { value, done } = await reader.read();
-            if (done) {
-              break;
-            }
-
-            fullText += decoder.decode(value, { stream: true });
-            const visibleText = fullText.trimStart() || "正在思考...";
-            updateSession((session) => {
-              const messages = [...session.messages];
-              messages[messages.length - 1] = {
-                role: "assistant",
-                content: visibleText
-              };
-              return { ...session, messages };
-            });
-            updateLastAssistantBubble(visibleText);
-          }
-
-          fullText += decoder.decode();
-          updateSession((session) => {
-            const messages = [...session.messages];
-            messages[messages.length - 1] = {
-              role: "assistant",
-              content: fullText.trimStart() || "未返回内容"
-            };
-            return { ...session, messages };
-          });
-
-          renderAll();
-          setBusy(false, "就绪");
-        } catch (error) {
-          updateSession((session) => ({
-            ...session,
-            messages: session.messages.map((item, index) => {
-              if (index === session.messages.length - 1 && item.role === "assistant") {
-                return { role: "assistant", content: `请求失败：${error.message}` };
-              }
-              return item;
-            })
-          }));
-          renderAll();
-          setBusy(false, "请求失败");
-        }
-      }
-
-      function formatNumber(value, digits = 1, suffix = "") {
-        if (value === null || value === undefined || Number.isNaN(Number(value))) {
-          return "--";
-        }
-        return `${Number(value).toFixed(digits)}${suffix}`;
-      }
-
-      function formatCoordinate(value) {
-        if (value === null || value === undefined || Number.isNaN(Number(value))) {
-          return "--";
-        }
-        return Number(value).toFixed(6);
-      }
-
-      function updateTelemetry(data) {
-        const isOnline = Boolean(data.ok);
-        telemetryEls.status.classList.toggle("online", isOnline);
-        telemetryEls.statusText.textContent = isOnline ? "Online" : "Offline";
-        telemetryEls.link.textContent = isOnline ? "OK" : "LOST";
-
-        telemetryEls.altitude.textContent = formatNumber(data.altitude, 1, " m");
-        telemetryEls.speed.textContent = formatNumber(data.speed, 1, " m/s");
-        telemetryEls.heading.textContent = formatNumber(data.heading, 0, " deg");
-        telemetryEls.verticalSpeed.textContent = formatNumber(data.verticalSpeed, 1, " m/s");
-        telemetryEls.latitude.textContent = formatCoordinate(data.latitude);
-        telemetryEls.longitude.textContent = formatCoordinate(data.longitude);
-        telemetryEls.roll.textContent = formatNumber(data.roll, 0, " deg");
-        telemetryEls.pitch.textContent = formatNumber(data.pitch, 0, " deg");
-        telemetryEls.yaw.textContent = formatNumber(data.yaw, 0, " deg");
-
-        const roll = Number(data.roll || 0);
-        const pitch = Math.max(-35, Math.min(35, Number(data.pitch || 0)));
-        telemetryEls.ball.style.transform = `rotate(${-roll}deg) translateY(${pitch * 0.35}px)`;
-      }
-
-      async function pollTelemetry() {
-        try {
-          const response = await fetch("/api/airsim/telemetry");
-          updateTelemetry(await response.json());
-        } catch (error) {
-          updateTelemetry({ ok: false, error: error.message });
-        }
-      }
-
-      document.getElementById("newSessionBtn").onclick = () => {
-        const sessions = readSessions();
-        const session = createSession();
-        sessions.unshift(session);
-        writeSessions(sessions);
-        setActiveId(session.id);
-        renderAll();
-      };
-
-      clearHistoryBtn.onclick = () => {
-        updateSession((session) => ({ ...session, messages: [] }));
-        renderAll();
-      };
-
-      urlSelect.onchange = () => {
-        urlInput.value = urlSelect.value;
-      };
-
-      sendBtn.onclick = sendMessage;
-
-      viewButtons.forEach((button) => {
-        button.onclick = () => switchCameraView(button.dataset.view);
-      });
-
-      messageInput.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" && !event.shiftKey) {
-          event.preventDefault();
-          sendMessage();
-        }
-      });
-
-      ensureSession();
-      renderAll();
-      pollTelemetry();
-      setInterval(pollTelemetry, 1000);
-    </script>
-  </body>
+  <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+  <script>window.UAV_CONFIG={defaultUrl:{{ default_url|tojson }}};</script>
+  <script src="/static/app.js" defer></script>
+</body>
 </html>

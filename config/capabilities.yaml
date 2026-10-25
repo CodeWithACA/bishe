@@ -1,0 +1,44 @@
+version: 1
+
+locations:
+  - id: school
+    name: 学校
+    frame: local_ned
+    position:
+      x: 120.0
+      y: 45.0
+      altitude_m: 8.0
+    yaw_deg: 90.0
+    tolerance_m: 1.0
+
+devices:
+  - id: emergency_light
+    name: 应急照明
+    kind: switch
+    initial_state: false
+
+capabilities:
+  flight.get_state:
+    risk_level: read
+    requires_confirmation: false
+  flight.takeoff:
+    risk_level: high
+    requires_confirmation: true
+  flight.land:
+    risk_level: high
+    requires_confirmation: true
+  flight.move:
+    risk_level: low
+    requires_confirmation: false
+  flight.set_yaw:
+    risk_level: low
+    requires_confirmation: false
+  flight.goto_location:
+    risk_level: low
+    requires_confirmation: false
+  device.get_state:
+    risk_level: read
+    requires_confirmation: false
+  device.set_state:
+    risk_level: high
+    requires_confirmation: true

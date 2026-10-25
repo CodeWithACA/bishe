@@ -72,7 +72,7 @@ conda run -n langgraphenv python stream_video.py --record frames\stream.mp4
 
 ## Frontend API views
 
-The Flask app supports named views:
+The FastAPI app supports named views:
 
 - `GET /api/airsim/views`: list supported views
 - `GET /api/airsim/stream?view=front`: HD front stream

@@ -10,12 +10,18 @@ import time
 
 DEFAULT_PX4_DIR = "~/px4v1.15.2"
 DEFAULT_MAVLINK_COMMAND = "mavlink start -x -u 14581 -r 4000000 -f -m onboard -o 14540 -t 192.168.240.1"
+DEFAULT_PX4_SIM_HOST_ADDR = os.getenv("PX4_SIM_HOST_ADDR", "192.168.240.1")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Start PX4 SITL in WSL and inject a MAVLink command into the PX4 shell.")
     parser.add_argument("--distro", default="", help="Optional WSL distro name.")
     parser.add_argument("--px4-dir", default=DEFAULT_PX4_DIR)
+    parser.add_argument(
+        "--px4-sim-host-addr",
+        default=DEFAULT_PX4_SIM_HOST_ADDR,
+        help="Windows AirSim host address reachable from WSL.",
+    )
     parser.add_argument("--startup-delay", type=float, default=5.0, help="Seconds to wait before sending the MAVLink command.")
     parser.add_argument("--mavlink-command", default=DEFAULT_MAVLINK_COMMAND)
     parser.add_argument("--no-cleanup", action="store_true", help="Do not run cleanup commands in WSL after Ctrl+C.")
@@ -28,7 +34,14 @@ def build_wsl_command(args: argparse.Namespace) -> list[str]:
     ]
     if args.distro:
         command.extend(["-d", args.distro])
-    command.extend(["--", "bash", "-lc", f"cd {args.px4_dir} && make px4_sitl_default none_iris"])
+    command.extend(
+        [
+            "--",
+            "bash",
+            "-lc",
+            f"export PX4_SIM_HOST_ADDR={args.px4_sim_host_addr} && cd {args.px4_dir} && make px4_sitl_default none_iris",
+        ]
+    )
     return command
 
 
